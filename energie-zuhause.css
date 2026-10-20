@@ -1,0 +1,117 @@
+/* Bereich „Energie Zuhause“ */
+.ez { display: flex; flex-direction: column; gap: 12px; }
+
+.ez-hinweis {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff4d6;
+  color: #6b4e00;
+  font-size: 0.85rem;
+}
+
+/* Große Übersicht mit Stromfluss */
+.ez-bild {
+  position: relative;
+  aspect-ratio: 10 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 80% at 50% 0%, #2b4a6b 0%, #14202e 60%, #0d141c 100%);
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+}
+.ez-bild.mit-foto::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.45) 100%);
+}
+.ez-bild svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+
+.ez-fluss { fill: none; stroke-width: 0.9; stroke-linecap: round; stroke-dasharray: 1.6 2.6; opacity: 0.95; }
+.ez-fluss.laeuft { animation: ez-fliessen 1.2s linear infinite; }
+.ez-fluss.rueck { animation-direction: reverse; }
+.ez-fluss.ruht { stroke: rgba(255,255,255,0.18); stroke-dasharray: none; animation: none; }
+@keyframes ez-fliessen { to { stroke-dashoffset: -4.2; } }
+@media (prefers-reduced-motion: reduce) { .ez-fluss.laeuft { animation: none; } }
+
+.ez-chip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 78px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(15, 22, 30, 0.72);
+  border: 1px solid rgba(255,255,255,0.14);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  text-align: center;
+  white-space: nowrap;
+}
+.ez-chip .wert { font-size: 1.05rem; font-weight: 700; }
+.ez-chip .name { font-size: 0.7rem; opacity: 0.8; }
+.ez-chip .extra { font-size: 0.7rem; opacity: 0.9; }
+
+/* Karten darunter */
+.ez-karte {
+  background: var(--karte);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.ez-karte h2 { margin: 0 0 10px; font-size: 0.95rem; }
+.ez-raster { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.ez-raster .zahl { font-size: 1.2rem; font-weight: 700; }
+.ez-raster .text { font-size: 0.75rem; color: var(--grau); }
+
+.ez-balken { height: 10px; border-radius: 5px; background: #e6e9e2; overflow: hidden; margin: 6px 0 4px; }
+.ez-balken > div { height: 100%; background: #2fb36b; border-radius: 5px; }
+
+.ez-schalter { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--rand); }
+.ez-schalter:first-of-type { border-top: 0; }
+.ez-schalter .text { font-size: 0.75rem; color: var(--grau); }
+.ez-schalter input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 48px;
+  height: 28px;
+  margin: 0;
+  border-radius: 14px;
+  background: #d5d9d0;
+  transition: background 0.2s;
+}
+.ez-schalter input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: transform 0.2s;
+}
+.ez-schalter input:checked { background: var(--gruen); }
+.ez-schalter input:checked::after { transform: translateX(20px); }
+.ez-schalter input:disabled { opacity: 0.6; }
+
+.ez-knopf {
+  display: block;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--karte);
+  border: 1px solid var(--rand);
+  color: var(--gruen);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+.ez-fussnote { font-size: 0.75rem; color: var(--grau); text-align: center; }

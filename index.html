@@ -10,6 +10,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Betrieb Aumeier">
+  <link rel="stylesheet" href="energie-zuhause.css">
   <style>
     :root {
       --gruen: #2e5d34;
@@ -105,18 +106,19 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v2</footer>
+  <footer>v3</footer>
+  <script src="energie-zuhause.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
-    // "link" = Kachel öffnet eine andere Seite direkt (z. B. Home Assistant).
+    // "link" = Kachel öffnet eine andere Seite direkt.
+    // "seite" = Funktion, die den Inhalt des Bereichs zeichnet (sonst Platzhalter).
     const BEREICHE = [
       { id: 'energie-biogas', name: 'Energie Biogasanlage', symbol: '⚡' },
       { id: 'getreidelager', name: 'Getreidelager', symbol: '🌾' },
       { id: 'wartung-maschinen', name: 'Wartung Maschinen', symbol: '🚜' },
       { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛' },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
-      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠',
-        link: 'http://192.168.178.100:8123', hinweis: 'öffnet Home Assistant (nur im WLAN zu Hause)' }
+      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause }
     ];
 
     const inhalt = document.getElementById('inhalt');
@@ -156,6 +158,7 @@
     function zeigeBereich(b) {
       titel.textContent = b.name;
       zurueck.style.display = 'block';
+      if (b.seite) { b.seite(inhalt); return; }
       const p = document.createElement('div');
       p.className = 'platzhalter';
       p.textContent = 'Hier entsteht der Bereich „' + b.name + '“';
