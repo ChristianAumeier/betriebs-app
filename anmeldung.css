@@ -1,0 +1,62 @@
+/* Anmeldung */
+.an { max-width: 420px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.an h2 { margin: 8px 0 0; font-size: 1.15rem; }
+.an p { margin: 0; line-height: 1.4; }
+.an .klein { font-size: 0.8rem; color: var(--grau); }
+.an label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; font-weight: 600; }
+.an input {
+  font: inherit;
+  font-weight: 400;
+  padding: 12px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: #fff;
+}
+.an input.code { font-size: 1.4rem; letter-spacing: 0.3em; text-align: center; }
+.an button, .an .knopf {
+  font: inherit;
+  font-weight: 600;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--gruen);
+  color: #fff;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.an button.leise, .an .knopf.leise { background: transparent; color: var(--gruen); border: 1px solid var(--rand); }
+.an button:disabled { opacity: 0.6; }
+.an .fehler {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fde8e8;
+  color: #7a1a1a;
+  font-size: 0.9rem;
+}
+.an .fehler .original { display: block; margin-top: 4px; font-size: 0.75rem; opacity: 0.8; }
+.an .ok { padding: 10px 12px; border-radius: 8px; background: #e3f4e8; color: #1d5a32; font-size: 0.9rem; }
+.an .qr { display: flex; justify-content: center; }
+.an .qr img { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 8px; border: 1px solid var(--rand); }
+.an .geheim { font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; word-break: break-all; text-align: center; }
+.an ol { margin: 0; padding-left: 20px; line-height: 1.5; }
+
+.konto { margin-top: 20px; text-align: center; font-size: 0.8rem; color: var(--grau); }
+.konto button {
+  font: inherit;
+  border: 0;
+  background: none;
+  color: var(--gruen);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.offline-hinweis {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #eef1ea;
+  color: var(--grau);
+  font-size: 0.8rem;
+  text-align: center;
+}

@@ -10,6 +10,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Betrieb Aumeier">
+  <link rel="stylesheet" href="anmeldung.css">
   <link rel="stylesheet" href="energie-zuhause.css">
   <style>
     :root {
@@ -106,7 +107,9 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v3</footer>
+  <footer>v4</footer>
+  <script src="lib/supabase-2.117.2.js"></script>
+  <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
@@ -152,7 +155,31 @@
         }
         raster.appendChild(a);
       }
-      inhalt.replaceChildren(raster);
+      const teile = [];
+      if (ohneNetz) {
+        const o = document.createElement('div');
+        o.className = 'offline-hinweis';
+        o.textContent = 'Ohne Netz – angezeigt wird, was auf dem Handy gespeichert ist.';
+        teile.push(o);
+      }
+      teile.push(raster, kontoZeile());
+      inhalt.replaceChildren(...teile);
+    }
+
+    // Unten auf der Startseite: wer angemeldet ist, Kennwort ändern, Abmelden
+    function kontoZeile() {
+      const k = document.createElement('div');
+      k.className = 'konto';
+      const wer = document.createElement('div');
+      window.Anmeldung.benutzerEmail().then((m) => { wer.textContent = m ? 'Angemeldet als ' + m : ''; });
+      const kw = document.createElement('button');
+      kw.textContent = 'Kennwort ändern';
+      kw.addEventListener('click', () => { location.hash = 'kennwort'; });
+      const ab = document.createElement('button');
+      ab.textContent = 'Abmelden';
+      ab.addEventListener('click', () => window.Anmeldung.abmelden());
+      k.append(wer, kw, ab);
+      return k;
     }
 
     function zeigeBereich(b) {
@@ -167,13 +194,24 @@
 
     function anzeigen() {
       const id = location.hash.slice(1);
+      if (id === 'kennwort') {
+        titel.textContent = 'Kennwort ändern';
+        zurueck.style.display = 'block';
+        window.Anmeldung.kennwortAendern(inhalt, () => { location.hash = ''; });
+        return;
+      }
       const b = BEREICHE.find((x) => x.id === id && !x.link);
       if (b) zeigeBereich(b); else zeigeStartseite();
       window.scrollTo(0, 0);
     }
 
-    window.addEventListener('hashchange', anzeigen);
-    anzeigen();
+    // Erst nach erfolgreicher Anmeldung (Kennwort + Code) wird die App gezeigt
+    let ohneNetz = false;
+    window.Anmeldung.start(inhalt, (zustand) => {
+      ohneNetz = zustand.offline;
+      window.addEventListener('hashchange', anzeigen);
+      anzeigen();
+    });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js');
