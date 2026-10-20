@@ -113,3 +113,5 @@ Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
 - 2026-10-20: Kein Home Assistant; Energie-Anzeige in der App, Daten über eigenen Datensammler vor Ort.
 - 2026-10-20: v1 = leeres Gerüst (PWA mit Manifest und Service-Worker, offline-fähig, `_config.yml` schließt `*.md` aus). Bei jeder neuen Version die Nummer in `index.html` (Fußzeile) und `VERSION` in `sw.js` hochzählen, sonst holen die Handys die neuen Dateien nicht.
 - 2026-10-20: Repository öffentlich statt privat, damit GitHub Pages kostenlos bleibt (privat bräuchte GitHub Pro). Christian ist einverstanden, dass Code und Konzept lesbar sind; Daten bleiben ausschließlich in Supabase.
+- 2026-10-20: v1 online unter https://christianaumeier.github.io/betriebs-app/ (GitHub Pages, Branch main, root). Von Christian am Handy geprüft: Installation und Start im Flugmodus klappen. v1 ist fertig.
+- Lehre: Der eingebaute Browser von Claude Code lädt keine Service-Worker. Offline-Tests deshalb in einem echten Browser (Edge) machen.
