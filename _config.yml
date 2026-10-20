@@ -1,0 +1,7 @@
+# GitHub Pages: diese Dateien werden NICHT veröffentlicht.
+# Interne Dokumente (*.md wie CLAUDE.md) bleiben nur im Repository.
+exclude:
+  - "*.md"
+  - "**/*.md"
+  - CLAUDE.md
+  - README.md

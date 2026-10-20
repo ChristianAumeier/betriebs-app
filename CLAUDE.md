@@ -1,0 +1,112 @@
+# Betriebs-App Aumeier
+
+Gedächtnis-Dokument für Claude Code. Bei jedem Start zuerst lesen, nach jeder Entscheidung fortschreiben.
+
+## Wer ich bin und wie wir arbeiten
+
+- Auftraggeber: Christian Aumeier, Landwirt (Bioland) und Betreiber einer Biogasanlage, Schierling (Bayern).
+- Christian programmiert nicht. Erkläre jeden Schritt in einfachen Worten, auf Deutsch.
+- Eine Sache pro Auftrag. Prüfe jede Änderung, bevor du sie vorlegst, und sag, was du geprüft hast und was nicht.
+- Trage jede Entscheidung und jede Lehre aus einem Fehler in diese Datei ein (Abschnitt „Entscheidungen“).
+- Jede Änderung bekommt eine Versionsnummer, die unten in der App steht (v1, v2, …).
+- Fertig ist etwas erst, wenn Christian es am Handy geprüft hat.
+- Christian gibt dir nie Passwörter oder den Supabase-Hauptschlüssel (service_role). Skripte, die Schlüssel brauchen, führt er selbst aus.
+
+## Ziel und Abgrenzung
+
+Die App dokumentiert und kontrolliert: was wann, von wem, wohin, in welcher Menge bewegt wurde, und ob es stimmt. Nachweise für Bioland, Umweltgutachter (EEG) und Finanzamt.
+
+Die App macht ausdrücklich nicht:
+- Anlagen regeln. Biogas, BHKWs, Speicher und PV werden von ihren Steuerungen geregelt.
+- In die Fernwirktechnik des Bayernwerks eingreifen. Höchstens Mitlesen über eine getrennte Leseschnittstelle.
+- Buchhaltung. Die App liefert Belege und Exporte für DATEV Unternehmen online, sie bucht nicht.
+
+## Die Betriebe (Mandanten)
+
+Jede Bewegung und jeder Beleg gehört genau einem Betrieb. Jeder Betrieb ist in DATEV Unternehmen online ein eigenes Unternehmen.
+
+| Betrieb | Was dazugehört | Kürzel |
+| --- | --- | --- |
+| Landwirtschaft | Ackerbau nach Bioland, Getreidelager | LW |
+| Biogasanlage | Fermenter, BHKWs, PV-Anlage mit Speicher | BG |
+| Maschinenvermietung Carolin Aumeier | Vermietmaschinen, LKW für Bahnschwellen-Transporte im Fremdauftrag; gewerblich | MC |
+| Landwirtschaft Carolin Aumeier | nicht buchführungspflichtig | LC |
+| Maschinenvermietung Christian Aumeier | bisher keine Vorgänge | MA |
+| Privat | PV-Anlage privat | PR |
+
+Folgen:
+1. Nummernkreise je Betrieb und Jahr, z. B. `LW-2026-00012`. Die Nummer vergibt die Datenbank, lückenlos.
+2. Die Betriebe sind untereinander Partner. Leistungen zwischen zwei Betrieben (z. B. Mais von LW an BG, Maschine von MC an LW) bekommen immer einen eigenen Beleg.
+3. Ein Zugang, der Betrieb ist oben umschaltbar. Auswertungen je Betrieb oder über alle.
+4. DATEV-Export je Betrieb getrennt.
+5. Privat erscheint nie in einem betrieblichen Export.
+
+## Grundmodell
+
+Fast alles ist eine **Warenbewegung**: Datum, Betrieb, Partner, Produkt, Menge, von → nach, Beleg. Getreidelager und Biogas sind zwei Ansichten auf dieselben Daten. Bestände ergeben sich aus den Bewegungen.
+
+Ebenen:
+- Fundament (für alle Betriebe gleich): Betriebe, Benutzer und Rollen, Stammdaten, Nummernkreise, Protokoll.
+- Kern: Warenbewegungen.
+- Module darauf (siehe Reihenfolge).
+
+Stammdaten:
+- Partner: Lieferanten, Abnehmer, Händler, Lohnunternehmer, Mieter; die eigenen Betriebe
+- Produkte: Weizen, Dinkel, Mais, Gülle, Gärrest …, jeweils mit Bio-Status
+- Orte: Lagerzellen, Fermenter, Felder
+- Maschinen und Fahrzeuge: mit Betrieb und Kennzeichen
+- Anlagen: PV-Anlagen, Speicher, BHKWs, mit Betrieb und Zähler
+
+## Technischer Aufbau
+
+| Baustein | Dienst | Aufgabe |
+| --- | --- | --- |
+| App | Webseite (PWA), gehostet über GitHub Pages, später eigene Domain | Erfassen und Anzeigen am Handy und PC, auch ohne Netz |
+| Daten | Supabase, Region Frankfurt | Anmeldung mit Zwei-Faktor, Datenbank, Belege als PDF (privater Speicher), tägliche Sicherung |
+| Code | GitHub, privates Repository `betriebs-app` | jede Fassung bleibt |
+| Waage (später) | Programm auf einem Kleinrechner an der Waage | liest Gewicht und Alibi-Nummer der geeichten Fuhrwerkswaage, schreibt in die Datenbank |
+| Datensammler Biogasanlage (später) | Industrie-Kleinrechner im Schaltschrank, USV, Kabel | liest BHKWs, Speicher, PV und Zähler nur lesend; puffert ohne Netz und sendet nach; Lebenszeichen jede Minute, sonst Alarm aufs Handy |
+
+Kein Home Assistant, keine NAS. Der Browser kann Geräte nicht direkt abfragen (CORS), deshalb holt ein Programm vor Ort die Werte ab und schreibt sie in die Datenbank.
+
+## Module und Reihenfolge
+
+Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
+
+1. **Fundament:** Anmeldung mit Zwei-Faktor, Betriebe, Rollen, Stammdaten, Nummernkreise, Protokoll.
+2. **Getreidelager:** Wareneingang, Warenausgang, Bestand je Lagerort und Partie, Bioland-Warenfluss.
+3. **Biogas:** Einsatzstofftagebuch aus denselben Bewegungen, Gärrestabgabe.
+4. **Maschinen und LKW:** Vermietungen und Einsätze je Maschine, LKW-Fahrten für fremde Auftraggeber, Belege zwischen den Betrieben.
+5. **Energie:** Live-Ansicht und Auswertung von BHKWs, Speicher, PV und Zählern nach Tag, Monat und Jahr; Monatswerte je Anlage und Betrieb.
+6. **Abläufe und Wartung:** Checklisten, Fälligkeiten, QR-Codes an Anlagenteilen mit Erklärvideos.
+7. **Auswertung und Export:** DATEV, Umweltgutachter, Öko-Kontrolle, Steuerberater.
+
+## Feste Regeln
+
+- Nichts wird gelöscht, nur storniert. Ein falscher Beleg bekommt Stornovermerk und Nachfolger.
+- Jede Zeile trägt, wer sie wann angelegt und geändert hat.
+- Jede Bewegung gehört genau einem Betrieb. Zwischen zwei Betrieben gibt es immer einen Beleg.
+- Bestand wird nie eingetippt. Inventur = eigene Korrekturbewegung mit Begründung.
+- Gewichte kommen von der geeichten Fuhrwerkswaage: Gewicht und Alibi-Nummer zusammen, nie verändert. Handeingaben stehen sichtbar als „manuell“ auf dem Beleg (Eichrecht).
+- Bio-Status hängt an jeder Partie. Bio und konventionell im selben Lagerort → Warnung.
+- Rechte stehen in der Datenbank (Row Level Security), nicht nur in der App.
+- Handy zuerst, offline-fähig. Der PC ist für Auswertungen.
+
+## Sicherheit
+
+- Zwei-Faktor für jedes Konto. Selbstregistrierung aus, Konten legt nur Christian an; neue Konten starten gesperrt.
+- Nur der öffentliche Supabase-Schlüssel (anon) steht im Code. Der Hauptschlüssel nie im Repository, nie im Chat.
+- GitHub Pages liefert jede Datei aus: Interne Dateien in Ordner mit Unterstrich, `_config.yml` schließt `*.md` aus.
+- Fehlermeldungen zeigen immer den Originaltext von Server oder Gerät.
+
+## Offene Fragen
+
+- Wer benutzt die App: Christian, Carolin, Mitarbeiter, Fahrer? (Rollen so anlegen, dass später welche dazukommen.)
+- Welche Fuhrwerkswaage (Hersteller, Anzeige), welche Schnittstelle (RS232 oder Netzwerk)?
+- Gibt es eine getrennte Leseschnittstelle zu den Daten der Fernwirktechnik? (Gespräch mit dem Programmierer am 21.10.2026)
+- Wie ist die Biogasanlage (ca. 1 km vom Büro) angebunden, gibt es dort Internet?
+
+## Entscheidungen
+
+- 2026-10-20: Grundkonzept festgelegt (Mehrbetrieb, Warenbewegung als Kern, Reihenfolge der Module).
+- 2026-10-20: Kein Home Assistant; Energie-Anzeige in der App, Daten über eigenen Datensammler vor Ort.
