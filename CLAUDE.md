@@ -63,7 +63,7 @@ Stammdaten:
 | --- | --- | --- |
 | App | Webseite (PWA), gehostet über GitHub Pages, später eigene Domain | Erfassen und Anzeigen am Handy und PC, auch ohne Netz |
 | Daten | Supabase, Region Frankfurt | Anmeldung mit Zwei-Faktor, Datenbank, Belege als PDF (privater Speicher), tägliche Sicherung |
-| Code | GitHub, privates Repository `betriebs-app` | jede Fassung bleibt |
+| Code | GitHub, öffentliches Repository `betriebs-app` | jede Fassung bleibt |
 | Waage (später) | Programm auf einem Kleinrechner an der Waage | liest Gewicht und Alibi-Nummer der geeichten Fuhrwerkswaage, schreibt in die Datenbank |
 | Datensammler Biogasanlage (später) | Industrie-Kleinrechner im Schaltschrank, USV, Kabel | liest BHKWs, Speicher, PV und Zähler nur lesend; puffert ohne Netz und sendet nach; Lebenszeichen jede Minute, sonst Alarm aufs Handy |
 
@@ -96,6 +96,7 @@ Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
 
 - Zwei-Faktor für jedes Konto. Selbstregistrierung aus, Konten legt nur Christian an; neue Konten starten gesperrt.
 - Nur der öffentliche Supabase-Schlüssel (anon) steht im Code. Der Hauptschlüssel nie im Repository, nie im Chat.
+- Das Repository ist öffentlich: Code und Konzept darf jeder lesen. Deshalb nie Betriebsdaten, Personendaten, Passwörter oder Schlüssel (außer anon) ins Repository. Alle Daten liegen nur in Supabase.
 - GitHub Pages liefert jede Datei aus: Interne Dateien in Ordner mit Unterstrich, `_config.yml` schließt `*.md` aus.
 - Fehlermeldungen zeigen immer den Originaltext von Server oder Gerät.
 
@@ -110,3 +111,5 @@ Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
 
 - 2026-10-20: Grundkonzept festgelegt (Mehrbetrieb, Warenbewegung als Kern, Reihenfolge der Module).
 - 2026-10-20: Kein Home Assistant; Energie-Anzeige in der App, Daten über eigenen Datensammler vor Ort.
+- 2026-10-20: v1 = leeres Gerüst (PWA mit Manifest und Service-Worker, offline-fähig, `_config.yml` schließt `*.md` aus). Bei jeder neuen Version die Nummer in `index.html` (Fußzeile) und `VERSION` in `sw.js` hochzählen, sonst holen die Handys die neuen Dateien nicht.
+- 2026-10-20: Repository öffentlich statt privat, damit GitHub Pages kostenlos bleibt (privat bräuchte GitHub Pro). Christian ist einverstanden, dass Code und Konzept lesbar sind; Daten bleiben ausschließlich in Supabase.
