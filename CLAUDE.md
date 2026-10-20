@@ -67,7 +67,7 @@ Stammdaten:
 | Waage (später) | Programm auf einem Kleinrechner an der Waage | liest Gewicht und Alibi-Nummer der geeichten Fuhrwerkswaage, schreibt in die Datenbank |
 | Datensammler Biogasanlage (später) | Industrie-Kleinrechner im Schaltschrank, USV, Kabel | liest BHKWs, Speicher, PV und Zähler nur lesend; puffert ohne Netz und sendet nach; Lebenszeichen jede Minute, sonst Alarm aufs Handy |
 
-Kein Home Assistant, keine NAS. Der Browser kann Geräte nicht direkt abfragen (CORS), deshalb holt ein Programm vor Ort die Werte ab und schreibt sie in die Datenbank.
+Für die Biogasanlage kein Home Assistant und keine NAS. Ausnahme „Energie Zuhause“: Das ist der bestehende Home Assistant auf der NAS daheim, vorerst nur als Link aus der App (siehe Entscheidungen). Der Browser kann Geräte nicht direkt abfragen (CORS), deshalb holt ein Programm vor Ort die Werte ab und schreibt sie in die Datenbank.
 
 ## Module und Reihenfolge
 
@@ -115,3 +115,6 @@ Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
 - 2026-10-20: Repository öffentlich statt privat, damit GitHub Pages kostenlos bleibt (privat bräuchte GitHub Pro). Christian ist einverstanden, dass Code und Konzept lesbar sind; Daten bleiben ausschließlich in Supabase.
 - 2026-10-20: v1 online unter https://christianaumeier.github.io/betriebs-app/ (GitHub Pages, Branch main, root). Von Christian am Handy geprüft: Installation und Start im Flugmodus klappen. v1 ist fertig.
 - Lehre: Der eingebaute Browser von Claude Code lädt keine Service-Worker. Offline-Tests deshalb in einem echten Browser (Edge) machen.
+- 2026-10-20: Christian sieht die App als Dach mit vielen Bereichen, die nach und nach dazukommen. Startseite mit Kacheln in dieser Reihenfolge: Energie Biogasanlage, Getreidelager, Wartung Maschinen, Bahnschwellen, Wartung Biogasanlage, Energie Zuhause. Welcher Bereich zuerst Inhalt bekommt, entscheidet Christian. Die Reihenfolge unter „Module und Reihenfolge“ ist damit nicht mehr fest. Beispiele wie Mais-Lieferungen an die Biogasanlage interessieren derzeit nicht.
+- 2026-10-20: „Energie Zuhause“ öffnet vorerst nur den Home Assistant (http://192.168.178.100:8123, nur im WLAN daheim erreichbar). Werte direkt in der App anzeigen: vielleicht später. Damit ist „Kein Home Assistant“ für den Bereich Zuhause aufgehoben.
+- 2026-10-20: v2 = Startseite mit Kacheln. Die Bereiche stehen als Liste `BEREICHE` in `index.html`; Unterseiten laufen über Adressen mit `#` (z. B. `#getreidelager`), so funktionieren sie auch offline ohne zusätzliche Dateien.

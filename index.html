@@ -14,6 +14,8 @@
     :root {
       --gruen: #2e5d34;
       --hintergrund: #f4f5f1;
+      --karte: #ffffff;
+      --rand: #dfe2da;
       --text: #1d1f1b;
       --grau: #6b6f66;
     }
@@ -27,18 +29,65 @@
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
     header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
       background: var(--gruen);
       color: #fff;
       padding: calc(env(safe-area-inset-top) + 14px) 16px 14px;
       font-size: 1.25rem;
       font-weight: 600;
     }
+    #zurueck {
+      display: none;
+      border: 0;
+      background: none;
+      color: #fff;
+      font-size: 1.5rem;
+      line-height: 1;
+      padding: 0 4px;
+      cursor: pointer;
+    }
     main {
       flex: 1;
+      padding: 16px;
+      width: 100%;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .kacheln {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    @media (min-width: 600px) {
+      .kacheln { grid-template-columns: repeat(3, 1fr); }
+    }
+    .kachel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 120px;
+      padding: 12px;
+      background: var(--karte);
+      border: 1px solid var(--rand);
+      border-radius: 12px;
+      color: var(--text);
+      text-decoration: none;
+      text-align: center;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .kachel:active { background: #eef1ea; }
+    .kachel .symbol { font-size: 2rem; }
+    .kachel .hinweis { font-size: 0.75rem; font-weight: 400; color: var(--grau); }
+    .platzhalter {
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px 16px;
+      min-height: 50vh;
       text-align: center;
       font-size: 1.1rem;
     }
@@ -51,10 +100,78 @@
   </style>
 </head>
 <body>
-  <header>Betrieb Aumeier</header>
-  <main>Hier entsteht die Betriebs-App</main>
-  <footer>v1</footer>
+  <header>
+    <button id="zurueck" aria-label="Zurück zur Startseite">←</button>
+    <span id="titel">Betrieb Aumeier</span>
+  </header>
+  <main id="inhalt"></main>
+  <footer>v2</footer>
   <script>
+    // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
+    // "link" = Kachel öffnet eine andere Seite direkt (z. B. Home Assistant).
+    const BEREICHE = [
+      { id: 'energie-biogas', name: 'Energie Biogasanlage', symbol: '⚡' },
+      { id: 'getreidelager', name: 'Getreidelager', symbol: '🌾' },
+      { id: 'wartung-maschinen', name: 'Wartung Maschinen', symbol: '🚜' },
+      { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛' },
+      { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
+      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠',
+        link: 'http://192.168.178.100:8123', hinweis: 'öffnet Home Assistant (nur im WLAN zu Hause)' }
+    ];
+
+    const inhalt = document.getElementById('inhalt');
+    const titel = document.getElementById('titel');
+    const zurueck = document.getElementById('zurueck');
+    zurueck.addEventListener('click', () => { location.hash = ''; });
+
+    function zeigeStartseite() {
+      titel.textContent = 'Betrieb Aumeier';
+      zurueck.style.display = 'none';
+      const raster = document.createElement('div');
+      raster.className = 'kacheln';
+      for (const b of BEREICHE) {
+        const a = document.createElement('a');
+        a.className = 'kachel';
+        if (b.link) {
+          a.href = b.link;
+          a.target = '_blank';
+          a.rel = 'noopener';
+        } else {
+          a.href = '#' + b.id;
+        }
+        a.innerHTML = '<span class="symbol"></span><span class="name"></span>';
+        a.querySelector('.symbol').textContent = b.symbol;
+        a.querySelector('.name').textContent = b.name;
+        if (b.hinweis) {
+          const h = document.createElement('span');
+          h.className = 'hinweis';
+          h.textContent = b.hinweis;
+          a.appendChild(h);
+        }
+        raster.appendChild(a);
+      }
+      inhalt.replaceChildren(raster);
+    }
+
+    function zeigeBereich(b) {
+      titel.textContent = b.name;
+      zurueck.style.display = 'block';
+      const p = document.createElement('div');
+      p.className = 'platzhalter';
+      p.textContent = 'Hier entsteht der Bereich „' + b.name + '“';
+      inhalt.replaceChildren(p);
+    }
+
+    function anzeigen() {
+      const id = location.hash.slice(1);
+      const b = BEREICHE.find((x) => x.id === id && !x.link);
+      if (b) zeigeBereich(b); else zeigeStartseite();
+      window.scrollTo(0, 0);
+    }
+
+    window.addEventListener('hashchange', anzeigen);
+    anzeigen();
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js');
     }
