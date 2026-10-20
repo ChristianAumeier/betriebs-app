@@ -6,6 +6,7 @@
   const SUPABASE_URL = 'https://trwazyqryqdjbfggaufd.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_9zKcwyfgNlg19tYQDpivLQ_4j_JkxOc'; // öffentlich, darf in den Code
   const SPEICHER_SCHLUESSEL = 'sb-trwazyqryqdjbfggaufd-auth-token';
+  const EINRICHTUNG_SCHLUESSEL = 'betriebsapp-code-einrichtung';
 
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
@@ -180,19 +181,30 @@
     const lade = el('p', { class: 'klein' }, 'Wird vorbereitet …');
     box.append(lade);
 
-    // Halb fertige Einrichtungen von früher entfernen
+    // Angefangene Einrichtung weiterverwenden: Das iPhone lädt die App beim Wechsel
+    // zur Passwörter-App manchmal neu; ein neuer Code-Generator passte dann nicht mehr.
+    let gemerkt = null;
+    try { gemerkt = JSON.parse(localStorage.getItem(EINRICHTUNG_SCHLUESSEL) || 'null'); } catch (e) { gemerkt = null; }
+
     const faktoren = await sb.auth.mfa.listFactors();
     if (faktoren.error) { lade.replaceWith(fehlerKasten(faktoren.error)); return; }
+    let data = null;
     for (const f of faktoren.data.all) {
-      if (f.factor_type === 'totp' && f.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: f.id });
+      if (f.factor_type !== 'totp' || f.status === 'verified') continue;
+      if (gemerkt && gemerkt.id === f.id) { data = gemerkt; continue; }
+      await sb.auth.mfa.unenroll({ factorId: f.id }); // halb fertige Reste entfernen
     }
 
-    const { data, error } = await sb.auth.mfa.enroll({
-      factorType: 'totp',
-      issuer: 'Betrieb Aumeier',
-      friendlyName: 'Code ' + new Date().toISOString().slice(0, 16)
-    });
-    if (error) { lade.replaceWith(fehlerKasten(error)); return; }
+    if (!data) {
+      const r = await sb.auth.mfa.enroll({
+        factorType: 'totp',
+        issuer: 'Betrieb Aumeier',
+        friendlyName: 'Code ' + new Date().toISOString().slice(0, 16)
+      });
+      if (r.error) { lade.replaceWith(fehlerKasten(r.error)); return; }
+      data = { id: r.data.id, totp: r.data.totp };
+      try { localStorage.setItem(EINRICHTUNG_SCHLUESSEL, JSON.stringify(data)); } catch (e) { /* dann eben ohne */ }
+    }
     lade.remove();
 
     box.append(el('p', null, 'Schritt 1 – am iPhone:'));
@@ -218,6 +230,7 @@
         meldung.replaceChildren();
         const r = await sb.auth.mfa.challengeAndVerify({ factorId: data.id, code: code.value.trim() });
         if (r.error) { meldung.append(fehlerKasten(r.error)); code.value = ''; return; }
+        try { localStorage.removeItem(EINRICHTUNG_SCHLUESSEL); } catch (e) { /* egal */ }
         fertigMelden({ offline: false });
       });
     });
@@ -256,7 +269,7 @@
 
   async function abmelden() {
     try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { /* ohne Netz: lokal trotzdem weg */ }
-    try { localStorage.removeItem(SPEICHER_SCHLUESSEL); } catch (e) { /* egal */ }
+    try { localStorage.removeItem(SPEICHER_SCHLUESSEL); localStorage.removeItem(EINRICHTUNG_SCHLUESSEL); } catch (e) { /* egal */ }
     location.hash = '';
     location.reload();
   }
