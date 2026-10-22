@@ -9,6 +9,21 @@
   const ABFRAGE_MS = 30000;
   const ZU_ALT_S = 5 * 60;
 
+  // Foto vom Auto in der Wallbox-Karte. Liegt geschützt in Supabase (Tabelle bilder, Name 'auto'),
+  // nicht im öffentlichen Repository. Auf dem Gerät gemerkt, damit es auch ohne Netz da ist.
+  const BILD_SPEICHER = 'betriebsapp-bild-auto';
+  let autoBild = null;
+  try { autoBild = localStorage.getItem(BILD_SPEICHER); } catch (e) { /* ohne Speicher */ }
+  async function autoBildHolen() {
+    const { data, error } = await window.sb.from('bilder').select('typ, daten').eq('name', 'auto').maybeSingle();
+    if (error || !data) return false;
+    const neu = 'data:' + data.typ + ';base64,' + data.daten;
+    if (neu === autoBild) return false;
+    autoBild = neu;
+    try { localStorage.setItem(BILD_SPEICHER, neu); } catch (e) { /* ohne Speicher */ }
+    return true;
+  }
+
   // Foto für den Hintergrund (später). Leer = gezeichnetes Haus.
   const FOTO = '';
 
@@ -97,6 +112,7 @@
 
     let zeit = null; // aktualisiert_am der zuletzt geholten Zeile
     let laeuft = false;
+    let letzte = null; // zuletzt geholte Zeile, zum Neuzeichnen, wenn das Foto ankommt
 
     function standZeigen() {
       if (!zeit) return;
@@ -126,6 +142,7 @@
           return;
         }
         zeit = new Date(data.aktualisiert_am);
+        letzte = data;
         zeichnen(inhalt, data.werte || {}, data.tagesstart || {});
         standZeigen();
       } catch (e) {
@@ -148,6 +165,10 @@
       document.removeEventListener('visibilitychange', sichtbar);
     }
     holen();
+    // Foto einmal pro Öffnen nachsehen (geändert oder noch nicht auf dem Gerät)
+    autoBildHolen().then((neu) => {
+      if (neu && letzte && box.isConnected) zeichnen(inhalt, letzte.werte || {}, letzte.tagesstart || {});
+    }).catch(() => {});
   }
 
   function zeichnen(ziel, v, start) {
@@ -162,6 +183,16 @@
     svg.setAttribute('viewBox', '0 0 100 90');
     svg.setAttribute('aria-hidden', 'true');
     if (!FOTO) svg.innerHTML = hausZeichnung();
+    if (autoBild) {
+      // Auto rechts neben dem Haus, Räder auf dem Boden (y = 66); Bild ist 600 × 310, freigestellt
+      const auto = document.createElementNS(ns, 'image');
+      auto.setAttribute('href', autoBild);
+      auto.setAttribute('x', '70.5');
+      auto.setAttribute('y', '51.6');
+      auto.setAttribute('width', '28');
+      auto.setAttribute('height', '14.5');
+      svg.append(auto);
+    }
 
     const einspeisen = v.netz_w < 0;
     const netzFarbe = einspeisen ? FARBE.netzAus : FARBE.netzEin;
@@ -169,7 +200,7 @@
       fluss('M50,17.5 L50,27', FARBE.pv, v.pv_w > 50, false),
       fluss('M69,47 Q78,46 82,37', netzFarbe, Math.abs(v.netz_w) > 50, !einspeisen),
       fluss('M33,63 Q24,64 19,71', FARBE.speicher, Math.abs(v.speicher_w) > 50, v.speicher_w < 0),
-      fluss('M67,63 Q76,64 81,71', FARBE.wallbox, v.wallbox_w > 50, false)
+      fluss(autoBild ? 'M67,64 Q70,64 72,62' : 'M67,63 Q76,64 81,71', FARBE.wallbox, v.wallbox_w > 50, false)
     );
     bild.append(svg);
 
