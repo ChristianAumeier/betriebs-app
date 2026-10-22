@@ -1,23 +1,13 @@
 // Bereich „Energie Zuhause“: Übersicht der PV-Anlage daheim.
-// Die Werte kommen später aus Supabase (vom Home Assistant eingeworfen).
-// Bis dahin: Beispielwerte, deutlich gekennzeichnet.
+// Die Werte liegen in Supabase (Tabelle energie_zuhause, eine Zeile). Der Home Assistant
+// wirft sie alle 30 Sekunden ein, die App liest sie, solange die Ansicht offen ist.
 
 (function () {
-  // Vorzeichen wie im Home Assistant:
+  // Vorzeichen in werte:
   // netz_w negativ = Einspeisung, positiv = Bezug; speicher_w positiv = lädt, negativ = entlädt.
-  const BEISPIEL = {
-    beispiel: true,
-    pv_w: 5279,
-    haus_w: 4445,
-    netz_w: -600,
-    speicher_w: 234,
-    speicher_prozent: 16.9,
-    wallbox_w: 0,
-    wallbox_status: 'lädt nicht',
-    winterladen: false,
-    volle_ladung: false,
-    heute: { erzeugung_kwh: 18.4, eigenverbrauch_kwh: 14.3, einspeisung_kwh: 4.1, bezug_kwh: 6.2 }
-  };
+  // Zählerstände *_kwh_gesamt; tagesstart = Zählerstände zu Tagesbeginn (deutsche Zeit).
+  const ABFRAGE_MS = 30000;
+  const ZU_ALT_S = 5 * 60;
 
   // Foto für den Hintergrund (später). Leer = gezeichnetes Haus.
   const FOTO = '';
@@ -29,11 +19,29 @@
   // Positionen im Bild (Breite 100, Höhe 90)
   const POS = { pv: [50, 12], haus: [50, 53], netz: [85, 32], speicher: [17, 77], wallbox: [83, 77] };
 
+  function istZahl(x) { return typeof x === 'number' && isFinite(x); }
   function kw(w) {
+    if (!istZahl(w)) return '–';
     return (Math.abs(w) / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kW';
   }
   function zahl(x, stellen) {
+    if (!istZahl(x)) return '–';
     return x.toLocaleString('de-DE', { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
+  }
+  // Differenz Zählerstand jetzt minus Tagesbeginn (null, wenn etwas fehlt)
+  function seitHeute(jetzt, start) {
+    return istZahl(jetzt) && istZahl(start) ? Math.max(0, jetzt - start) : null;
+  }
+  function wallboxText(s) {
+    if (!s) return '';
+    return String(s).replace('Laedt', 'lädt');
+  }
+  function vorWieLange(sek) {
+    if (sek < 5) return 'gerade eben';
+    if (sek < 90) return 'vor ' + Math.round(sek) + ' Sekunden';
+    if (sek < 90 * 60) return 'vor ' + Math.round(sek / 60) + ' Minuten';
+    if (sek < 36 * 3600) return 'vor ' + Math.round(sek / 3600) + ' Stunden';
+    return 'vor ' + Math.round(sek / 86400) + ' Tagen';
   }
   function el(tag, klasse, text) {
     const e = document.createElement(tag);
@@ -75,13 +83,75 @@
       '<line x1="10" y1="66" x2="90" y2="66" stroke="rgba(255,255,255,0.15)" stroke-width="0.4"/>';
   }
 
+  // Ansicht öffnen: Zeile holen, alle 30 s neu holen, jede Sekunde „Stand“ fortschreiben.
+  // Sobald die Ansicht verlassen wird (box nicht mehr im Dokument), hört alles auf.
   function zeigeEnergieZuhause(ziel) {
-    const v = BEISPIEL;
     const box = el('div', 'ez');
+    const kopf = el('div', 'ez-kopf');
+    const stand = el('div', 'ez-stand', 'Werte werden geladen …');
+    const meldung = el('div');
+    const inhalt = el('div', 'ez');
+    kopf.append(stand, meldung);
+    box.append(kopf, inhalt);
+    ziel.replaceChildren(box);
 
-    if (v.beispiel) {
-      box.append(el('div', 'ez-hinweis', 'Beispielwerte – hier sind noch keine echten Daten angebunden.'));
+    let zeit = null; // aktualisiert_am der zuletzt geholten Zeile
+    let laeuft = false;
+
+    function standZeigen() {
+      if (!zeit) return;
+      const sek = (Date.now() - zeit.getTime()) / 1000;
+      stand.textContent = 'Stand: ' + vorWieLange(Math.max(0, sek));
+      const alt = sek > ZU_ALT_S;
+      stand.classList.toggle('alt', alt);
+      const warnung = meldung.querySelector('.ez-hinweis.alt');
+      if (alt && !warnung) {
+        meldung.prepend(el('div', 'ez-hinweis alt',
+          'Achtung: Die Werte sind älter als 5 Minuten. Der Home Assistant meldet gerade nichts.'));
+      } else if (!alt && warnung) {
+        warnung.remove();
+      }
     }
+
+    async function holen() {
+      if (laeuft || !box.isConnected) return;
+      laeuft = true;
+      try {
+        const { data, error } = await window.sb.from('energie_zuhause').select('*').single();
+        if (!box.isConnected) return;
+        meldung.querySelectorAll('.ez-hinweis.fehler').forEach((e) => e.remove());
+        if (error) throw error;
+        if (!data.aktualisiert_am) {
+          stand.textContent = 'Der Home Assistant hat noch keine Werte gemeldet.';
+          return;
+        }
+        zeit = new Date(data.aktualisiert_am);
+        zeichnen(inhalt, data.werte || {}, data.tagesstart || {});
+        standZeigen();
+      } catch (e) {
+        if (!box.isConnected) return;
+        const text = (e && e.message) ? e.message + (e.code ? ' (' + e.code + ')' : '') : String(e);
+        meldung.append(el('div', 'ez-hinweis fehler', 'Werte konnten nicht geladen werden: ' + text));
+        if (!zeit) stand.textContent = '';
+      } finally {
+        laeuft = false;
+      }
+    }
+
+    const abfrage = setInterval(() => { if (!box.isConnected) aufhoeren(); else if (!document.hidden) holen(); }, ABFRAGE_MS);
+    const uhr = setInterval(() => { if (!box.isConnected) aufhoeren(); else standZeigen(); }, 1000);
+    function sichtbar() { if (!document.hidden) holen(); }
+    document.addEventListener('visibilitychange', sichtbar);
+    function aufhoeren() {
+      clearInterval(abfrage);
+      clearInterval(uhr);
+      document.removeEventListener('visibilitychange', sichtbar);
+    }
+    holen();
+  }
+
+  function zeichnen(ziel, v, start) {
+    const box = el('div', 'ez');
 
     // --- Übersicht mit Stromfluss ---
     const bild = el('div', 'ez-bild' + (FOTO ? ' mit-foto' : ''));
@@ -110,7 +180,7 @@
       chip('Speicher', zahl(v.speicher_prozent, 0) + ' %',
         Math.abs(v.speicher_w) > 50 ? (v.speicher_w > 0 ? 'lädt ' : 'entlädt ') + kw(v.speicher_w) : 'Ruhe',
         FARBE.speicher, POS.speicher),
-      chip('Wallbox', v.wallbox_w > 50 ? kw(v.wallbox_w) : '–', v.wallbox_status, FARBE.wallbox, POS.wallbox)
+      chip('Wallbox', v.wallbox_w > 50 ? kw(v.wallbox_w) : '–', wallboxText(v.wallbox_status), FARBE.wallbox, POS.wallbox)
     );
     box.append(bild);
 
@@ -118,13 +188,18 @@
     const heute = el('div', 'ez-karte');
     heute.append(el('h2', null, 'Heute'));
     const raster = el('div', 'ez-raster');
-    const h = v.heute;
-    const quote = h.erzeugung_kwh > 0 ? Math.round(h.eigenverbrauch_kwh / h.erzeugung_kwh * 100) : 0;
+    const erzeugt = seitHeute(v.erzeugung_kwh_gesamt, start.erzeugung_kwh);
+    const eingespeist = seitHeute(v.einspeisung_kwh_gesamt, start.einspeisung_kwh);
+    const bezogen = seitHeute(v.bezug_kwh_gesamt, start.bezug_kwh);
+    // selbst verbraucht = erzeugt − eingespeist, als Anteil an der Erzeugung
+    const quote = istZahl(erzeugt) && istZahl(eingespeist) && erzeugt > 0
+      ? Math.round(Math.max(0, erzeugt - eingespeist) / erzeugt * 100) : null;
+    const kwh = (x) => istZahl(x) ? zahl(x, 1) + ' kWh' : '–';
     [
-      [zahl(h.erzeugung_kwh, 1) + ' kWh', 'erzeugt'],
-      [quote + ' %', 'selbst verbraucht'],
-      [zahl(h.einspeisung_kwh, 1) + ' kWh', 'eingespeist'],
-      [zahl(h.bezug_kwh, 1) + ' kWh', 'aus dem Netz']
+      [kwh(erzeugt), 'erzeugt'],
+      [istZahl(quote) ? quote + ' %' : '–', 'selbst verbraucht'],
+      [kwh(eingespeist), 'eingespeist'],
+      [kwh(bezogen), 'aus dem Netz']
     ].forEach(([z, t]) => {
       const d = el('div');
       d.append(el('div', 'zahl', z), el('div', 'text', t));
@@ -157,7 +232,7 @@
       links.append(el('div', null, name), el('div', 'text', text));
       const s = document.createElement('input');
       s.type = 'checkbox';
-      s.checked = an;
+      s.checked = an === true;
       s.disabled = true;
       zeile.append(links, s);
       wb.append(zeile);

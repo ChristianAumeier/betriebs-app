@@ -10,7 +10,9 @@ Gedächtnis-Dokument für Claude Code. Bei jedem Start zuerst lesen, nach jeder 
 - Trage jede Entscheidung und jede Lehre aus einem Fehler in diese Datei ein (Abschnitt „Entscheidungen“).
 - Jede Änderung bekommt eine Versionsnummer, die unten in der App steht (v1, v2, …).
 - Fertig ist etwas erst, wenn Christian es am Handy geprüft hat.
-- Christian gibt dir nie Passwörter oder den Supabase-Hauptschlüssel (service_role). Skripte, die Schlüssel brauchen, führt er selbst aus.
+- Christian gibt dir nie Passwörter oder den Supabase-Hauptschlüssel (service_role).
+- Seit 2026-10-22: Claude erledigt alles selbst (Supabase über den Supabase-Connector, Home Assistant über die Dateien auf `\\HOMESERVER\docker\homeassistant` und die HA-Schnittstelle, Git, Hochladen). Christian kopiert nichts und klickt nicht in Dashboards. Vor Störendem oder Unumkehrbarem (Home-Assistant-Neustart, Löschen, Kosten) fragt Claude kurz mit einem Satz (ja/nein). Die NAS wird nie neu gestartet.
+- Schlüssel gehen nur von Maschine zu Maschine: Claude erzeugt sie lokal und schreibt sie direkt dorthin, wo sie gebraucht werden (z. B. `secrets.yaml`). Sie erscheinen nie im Chat, in einer Ausgabe oder im Repository. In der Datenbank steht nur die Prüfsumme.
 
 ## Ziel und Abgrenzung
 
@@ -67,7 +69,7 @@ Stammdaten:
 | Waage (später) | Programm auf einem Kleinrechner an der Waage | liest Gewicht und Alibi-Nummer der geeichten Fuhrwerkswaage, schreibt in die Datenbank |
 | Datensammler Biogasanlage (später) | Industrie-Kleinrechner im Schaltschrank, USV, Kabel | liest BHKWs, Speicher, PV und Zähler nur lesend; puffert ohne Netz und sendet nach; Lebenszeichen jede Minute, sonst Alarm aufs Handy |
 
-Für die Biogasanlage kein Home Assistant und keine NAS. Ausnahme „Energie Zuhause“: Das ist der bestehende Home Assistant auf der NAS daheim, vorerst nur als Link aus der App (siehe Entscheidungen). Der Browser kann Geräte nicht direkt abfragen (CORS), deshalb holt ein Programm vor Ort die Werte ab und schreibt sie in die Datenbank.
+Für die Biogasanlage kein Home Assistant und keine NAS. Ausnahme „Energie Zuhause“: Das ist der bestehende Home Assistant auf der NAS daheim; er wirft seine Werte in Supabase ein, die App liest sie dort (siehe Entscheidungen). Der Browser kann Geräte nicht direkt abfragen (CORS), deshalb holt ein Programm vor Ort die Werte ab und schreibt sie in die Datenbank.
 
 ## Module und Reihenfolge
 
@@ -131,3 +133,10 @@ Ein Modul nach dem anderen. Fertig ist es erst, wenn es im Alltag benutzt wird.
 - 2026-10-22: Anmeldung (v5) von Christian am iPhone abgenommen. Kennwort und Bestätigungscode liegen in der Passwörter-App im Eintrag „GitHub Pages“ (Website christianaumeier.github.io); nicht verwechseln mit dem Eintrag „GitHub“ (github.com). Zuverlässigster Weg zur Code-Einrichtung: im Eintrag „Bearbeiten“ → „Bestätigungscode einrichten“ → „Einrichtungsschlüssel eingeben“ (der `otpauth`-Knopf zeigte den Eintrag ausgegraut).
 - Regel: Die Anmeldeprüfung in der App ist nur Bedienkomfort. Der eigentliche Schutz sind die Rechte in der Datenbank: Jede Tabelle bekommt RLS-Regeln, die eine Anmeldung mit Code verlangen (`(auth.jwt() ->> 'aal') = 'aal2'`).
 - Konten anlegen: Christian im Supabase-Dashboard unter Authentication → Users → „Add user“ → „Create new user“, mit „Auto Confirm User“. Vorläufiges Kennwort, das danach in der App über „Kennwort ändern“ ersetzt wird. E-Mails verschickt Supabase im kostenlosen Tarif nur an Mitglieder der Organisation; für Einladungen an Mitarbeiter später eigenen Mailversand (SMTP) einrichten. Fotos vom iPhone kommen über iCloud für Windows in `C:\Users\Christian\Pictures\iCloud Photos\Photos` an (Format HEIC).
+- 2026-10-22: Briefkasten „Energie Zuhause“ in Betrieb (Datenbank-Änderungen stehen in `supabase/`, z. B. `001_energie_zuhause.sql`, als Migration angewendet):
+  - Tabelle `public.energie_zuhause` mit genau einer Zeile: `werte` (jsonb), `tag`, `tagesstart` (Zählerstände zu Tagesbeginn, deutsche Zeit), `aktualisiert_am`. Lesen nur angemeldet mit Code (aal2); ohne Anmeldung verweigert (geprüft).
+  - Schreiben nur über die Funktion `ha_melden(p_werte)` (`/rest/v1/rpc/ha_melden`, öffentlicher Schlüssel plus Kopfzeile `x-ha-schluessel`). Ohne oder mit falschem Schlüssel: Fehler 42501 (geprüft). Die Prüfsumme liegt in `intern.schluessel` (Name `homeassistant`), der Schlüssel selbst nur in der `secrets.yaml` als `supabase_ha_schluessel`. Neuer Schlüssel: lokal erzeugen, in `secrets.yaml` ersetzen, neue Prüfsumme eintragen.
+  - Home Assistant: `rest_command.supabase_energie_melden` in `configuration.yaml`, Automation „Betriebs-App: Werte an Supabase“ (`automations.yaml`, alle 30 s). Eingespielt mit `rest_command.reload` und `automation.reload`, ohne Neustart. Der HA-Ordner ist ein eigenes Git-Repository; vor jeder Änderung den Stand committen.
+  - Werte in `werte`: `pv_w`, `haus_w`, `netz_w` (negativ = Einspeisung), `speicher_w` (positiv = lädt; im HA umgekehrt, deshalb mit Minus), `speicher_prozent`, `wallbox_w`, `wallbox_status`, `winterladen`, `volle_ladung`, `erzeugung_kwh_gesamt`, `bezug_kwh_gesamt`, `einspeisung_kwh_gesamt`. Was im HA nicht verfügbar ist, kommt als null.
+- 2026-10-22: v6 = „Energie Zuhause“ zeigt echte Werte. Die App liest die Zeile alle 30 s, solange die Ansicht offen und sichtbar ist, zeigt „Stand: vor …“ und eine Warnung, wenn die Werte älter als 5 Minuten sind. Heute-Werte = Zählerstand jetzt minus `tagesstart`; selbst verbraucht = (erzeugt − eingespeist) / erzeugt. Wallbox-Schalter zeigen den echten Zustand, bleiben aber gesperrt (Schalten kommt später).
+- Hinweis: Der Supabase-Sicherheitscheck meldet `ha_melden` als „für jeden aufrufbar“. Das ist gewollt, die Funktion prüft den Schlüssel selbst. Ebenso gemeldet: `rls_auto_enable` (legt Supabase selbst an) und „Leaked Password Protection“ aus.
