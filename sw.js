@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -42,6 +42,7 @@ self.addEventListener('push', (event) => {
     body: n.text,
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
+    requireInteraction: true, // am PC bleibt sie stehen; am iPhone regelt das „Banner-Stil: Dauerhaft“
     data: { ziel: n.ziel || '#' }
   }));
 });

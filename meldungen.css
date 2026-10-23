@@ -9,6 +9,10 @@
 .ml-meldung .marke { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 .ml-meldung .bereich { font-weight: 600; }
 .ml-meldung .seit { opacity: 0.8; margin-left: auto; }
+.ml-meldung .zusatz { margin-top: 4px; font-size: 0.78rem; opacity: 0.85; }
+.ml-meldung.behoben { opacity: 0.85; }
+.ml-meldung button.gelesen { margin-top: 8px; padding: 8px 16px; border: 0; border-radius: 8px; background: #b3261e; color: #fff; font-weight: 600; font-size: 0.88rem; cursor: pointer; }
+.ml-meldung button.gelesen:disabled { opacity: 0.6; }
 
 .ml-karte { margin-top: 16px; padding: 12px 14px; background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
 .ml-karte .titel { font-weight: 600; }
