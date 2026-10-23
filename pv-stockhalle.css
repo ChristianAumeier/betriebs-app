@@ -1,0 +1,52 @@
+/* Bereich „PV Stockhalle“ */
+.ph { display: flex; flex-direction: column; gap: 12px; }
+.ph-meldungen { display: flex; flex-direction: column; gap: 8px; }
+.ph-meldungen:empty { display: none; }
+.ph-stand { font-size: 0.8rem; color: var(--grau); text-align: center; }
+.ph-stand.alt { color: #8a1c1c; font-weight: 600; }
+.ph-hinweis { padding: 8px 12px; border-radius: 8px; background: #fff4d6; color: #6b4e00; font-size: 0.85rem; }
+.ph-hinweis.fehler { background: #fde2e2; color: #8a1c1c; }
+
+.ph-gesamt {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f5b301 0%, #e08e00 100%);
+  color: #fff;
+  text-align: center;
+}
+.ph-gesamt .zahl { font-size: 1.5rem; font-weight: 700; }
+.ph-gesamt .text { font-size: 0.8rem; opacity: 0.9; }
+
+.ph-liste { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 600px) { .ph-liste { grid-template-columns: 1fr 1fr; } }
+
+.ph-anlage {
+  background: var(--karte);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ph-anlage.warnung { border-color: #e7a3a3; background: #fff8f8; }
+.ph-anlage .kopf { display: flex; align-items: center; gap: 8px; }
+.ph-anlage .nr { font-weight: 700; }
+.ph-anlage .name { color: var(--grau); font-size: 0.85rem; }
+.ph-anlage .punkt { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.ph-anlage .punkt.gruen { background: #2fb36b; }
+.ph-anlage .punkt.rot { background: #d64545; }
+.ph-anlage .punkt.grau { background: #b9bdb3; }
+.ph-anlage .werte { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ph-anlage .zahl { font-size: 1.05rem; font-weight: 700; }
+.ph-anlage .text { font-size: 0.72rem; color: var(--grau); }
+.ph-anlage .fuss { font-size: 0.75rem; color: var(--grau); }
+.ph-anlage.warnung .fuss { color: #8a1c1c; font-weight: 600; }
+
+.ph-balken { height: 8px; border-radius: 4px; background: #eceee8; overflow: hidden; }
+.ph-balken > div { height: 100%; background: #f5b301; border-radius: 4px; }
+
+.ph-fussnote { font-size: 0.75rem; color: var(--grau); text-align: center; }

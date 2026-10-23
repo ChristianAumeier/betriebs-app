@@ -12,6 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Betrieb Aumeier">
   <link rel="stylesheet" href="anmeldung.css">
   <link rel="stylesheet" href="energie-zuhause.css">
+  <link rel="stylesheet" href="pv-stockhalle.css">
   <style>
     :root {
       --gruen: #2e5d34;
@@ -107,10 +108,11 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v7</footer>
+  <footer>v8</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
+  <script src="pv-stockhalle.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
     // "link" = Kachel öffnet eine andere Seite direkt.
@@ -121,7 +123,8 @@
       { id: 'wartung-maschinen', name: 'Wartung Maschinen', symbol: '🚜' },
       { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛' },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
-      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause }
+      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause },
+      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle }
     ];
 
     const inhalt = document.getElementById('inhalt');
