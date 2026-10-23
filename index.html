@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="anmeldung.css">
   <link rel="stylesheet" href="energie-zuhause.css">
   <link rel="stylesheet" href="pv-stockhalle.css">
+  <link rel="stylesheet" href="meldungen.css">
   <style>
     :root {
       --gruen: #2e5d34;
@@ -108,11 +109,12 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v8</footer>
+  <footer>v9</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script src="pv-stockhalle.js"></script>
+  <script src="meldungen.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
     // "link" = Kachel öffnet eine andere Seite direkt.
@@ -165,7 +167,11 @@
         o.textContent = 'Ohne Netz – angezeigt wird, was auf dem Handy gespeichert ist.';
         teile.push(o);
       }
-      teile.push(raster, kontoZeile());
+      // Offene Störungen oben (wichtig und Hinweise), unten die Karte für Mitteilungen
+      if (!ohneNetz) teile.push(window.Meldungen.leiste());
+      teile.push(raster);
+      if (!ohneNetz) teile.push(window.Meldungen.karte());
+      teile.push(kontoZeile());
       inhalt.replaceChildren(...teile);
     }
 
@@ -212,6 +218,7 @@
     let ohneNetz = false;
     window.Anmeldung.start(inhalt, (zustand) => {
       ohneNetz = zustand.offline;
+      if (!ohneNetz) window.Meldungen.auffrischen();
       window.addEventListener('hashchange', anzeigen);
       anzeigen();
     });

@@ -1,0 +1,20 @@
+/* Meldungsleiste und Karte „Mitteilungen“ */
+.ml-leiste { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ml-leiste:empty { display: none; }
+.ml-meldung { padding: 10px 12px; border-radius: 10px; font-size: 0.88rem; background: #fff4d6; color: #5c4300; border: 1px solid #f0dc9c; }
+.ml-meldung.wichtig { background: #fde2e2; color: #7a1616; border-color: #f1b4b4; }
+.ml-meldung.fehler { background: #fde2e2; color: #8a1c1c; border-color: #f1b4b4; }
+.ml-meldung.ok { background: #e4f4e7; color: #1f5a2a; border-color: #b9dfc1; }
+.ml-meldung .kopf { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 2px; font-size: 0.75rem; }
+.ml-meldung .marke { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.ml-meldung .bereich { font-weight: 600; }
+.ml-meldung .seit { opacity: 0.8; margin-left: auto; }
+
+.ml-karte { margin-top: 16px; padding: 12px 14px; background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ml-karte .titel { font-weight: 600; }
+.ml-karte .zustand { font-size: 0.85rem; color: var(--grau); }
+.ml-karte .knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+.ml-karte .knoepfe:empty { display: none; }
+.ml-karte button { padding: 10px 14px; border-radius: 10px; border: 0; background: var(--gruen); color: #fff; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+.ml-karte button.leise { background: none; color: var(--gruen); border: 1px solid var(--rand); }
+.ml-karte button:disabled { opacity: 0.6; }

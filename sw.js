@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v8';
+const VERSION = 'v9';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -13,6 +13,8 @@ const DATEIEN = [
   'energie-zuhause.js',
   'pv-stockhalle.css',
   'pv-stockhalle.js',
+  'meldungen.css',
+  'meldungen.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png'
@@ -29,6 +31,30 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((namen) => Promise.all(namen.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
       .then(() => self.clients.claim())
+  );
+});
+
+// Push-Mitteilung von Supabase (Edge Function push-senden): { titel, text, ziel }
+self.addEventListener('push', (event) => {
+  let n = { titel: 'Betrieb Aumeier', text: '' };
+  try { n = Object.assign(n, event.data ? event.data.json() : {}); } catch (e) { n.text = event.data ? event.data.text() : ''; }
+  event.waitUntil(self.registration.showNotification(n.titel, {
+    body: n.text,
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    data: { ziel: n.ziel || '#' }
+  }));
+});
+
+// Tippen auf die Mitteilung öffnet die App (oder holt sie nach vorn)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const ziel = new URL('./' + ((event.notification.data && event.notification.data.ziel) || ''), self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((fenster) => {
+      for (const f of fenster) { if ('focus' in f) { f.navigate(ziel).catch(() => {}); return f.focus(); } }
+      return self.clients.openWindow(ziel);
+    })
   );
 });
 
