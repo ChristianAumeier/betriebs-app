@@ -75,6 +75,8 @@
 
 .ez-balken { height: 10px; border-radius: 5px; background: #e6e9e2; overflow: hidden; margin: 6px 0 4px; }
 .ez-balken > div { height: 100%; background: #2fb36b; border-radius: 5px; }
+.ez-balken.auto > div { background: #8a63d2; }
+.ez-auto-zeile { font-size: 0.85rem; text-align: center; }
 
 .ez-schalter { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--rand); }
 .ez-schalter:first-of-type { border-top: 0; }

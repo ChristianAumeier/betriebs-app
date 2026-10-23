@@ -43,6 +43,18 @@
     if (!istZahl(x)) return '–';
     return x.toLocaleString('de-DE', { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
   }
+  // Home Assistant schickt manche Zahlen als Text ("90"); null/leer bleibt null
+  function zahlOderNull(x) {
+    if (x === null || x === undefined || x === '') return null;
+    const n = Number(x);
+    return isFinite(n) ? n : null;
+  }
+  // „15:10“, bei anderem Tag „24.10. 15:10“
+  function uhrzeit(d) {
+    const zeit = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return new Date().toDateString() === d.toDateString() ? zeit
+      : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + zeit;
+  }
   // Differenz Zählerstand jetzt minus Tagesbeginn (null, wenn etwas fehlt)
   function seitHeute(jetzt, start) {
     return istZahl(jetzt) && istZahl(start) ? Math.max(0, jetzt - start) : null;
@@ -173,6 +185,7 @@
 
   function zeichnen(ziel, v, start) {
     const box = el('div', 'ez');
+    const autoSoc = zahlOderNull(v.auto_soc);
 
     // --- Übersicht mit Stromfluss ---
     const bild = el('div', 'ez-bild' + (FOTO ? ' mit-foto' : ''));
@@ -211,7 +224,8 @@
       chip('Speicher', zahl(v.speicher_prozent, 0) + ' %',
         Math.abs(v.speicher_w) > 50 ? (v.speicher_w > 0 ? 'lädt ' : 'entlädt ') + kw(v.speicher_w) : 'Ruhe',
         FARBE.speicher, POS.speicher),
-      chip('Wallbox', v.wallbox_w > 50 ? kw(v.wallbox_w) : '–', wallboxText(v.wallbox_status), FARBE.wallbox, POS.wallbox)
+      chip('Wallbox', v.wallbox_w > 50 ? kw(v.wallbox_w) : '–',
+        wallboxText(v.wallbox_status) + (istZahl(autoSoc) ? ' · Auto ' + zahl(autoSoc, 0) + ' %' : ''), FARBE.wallbox, POS.wallbox)
     );
     box.append(bild);
 
@@ -250,6 +264,33 @@
       zahl(v.speicher_prozent, 0) + ' % geladen · ' +
       (Math.abs(v.speicher_w) > 50 ? (v.speicher_w > 0 ? 'lädt mit ' : 'entlädt mit ') + kw(v.speicher_w) : 'in Ruhe')));
     box.append(sp);
+
+    // --- Auto (Mercedes EQV, Werte von Mercedes me über den Home Assistant) ---
+    if (istZahl(autoSoc)) {
+      const au = el('div', 'ez-karte');
+      au.append(el('h2', null, 'Auto'));
+      const ab = el('div', 'ez-balken auto');
+      const af = el('div');
+      af.style.width = Math.max(0, Math.min(100, autoSoc)) + '%';
+      ab.append(af);
+      const ziel = zahlOderNull(v.auto_soc_ziel);
+      const reichweite = zahlOderNull(v.auto_reichweite_km);
+      const reichweiteMax = zahlOderNull(v.auto_reichweite_max_km);
+      const zeilen = [
+        zahl(autoSoc, 0) + ' % geladen' + (istZahl(ziel) ? ' · Ladeziel ' + zahl(ziel, 0) + ' %' : ''),
+        istZahl(reichweite) ? 'Reichweite ' + zahl(reichweite, 0) + ' km' + (istZahl(reichweiteMax) ? ' (bei Ladeziel ca. ' + zahl(reichweiteMax, 0) + ' km)' : '') : null
+      ];
+      const ende = v.auto_ladeende ? new Date(v.auto_ladeende) : null;
+      if (v.auto_laedt === true) {
+        zeilen.push('lädt' + (ende && !isNaN(ende) && ende.getTime() > Date.now() ? ', fertig ca. ' + uhrzeit(ende) + ' Uhr' : ''));
+      }
+      // Zeitstempel von Mercedes ist UTC ohne Zonenangabe
+      const stand = v.auto_stand ? new Date(String(v.auto_stand).replace(' ', 'T') + 'Z') : null;
+      au.append(ab);
+      zeilen.filter(Boolean).forEach((t) => au.append(el('div', 'ez-auto-zeile', t)));
+      if (stand && !isNaN(stand)) au.append(el('div', 'ez-fussnote', 'Stand vom Auto: ' + uhrzeit(stand) + ' Uhr'));
+      box.append(au);
+    }
 
     // --- Wallbox ---
     const wb = el('div', 'ez-karte');
