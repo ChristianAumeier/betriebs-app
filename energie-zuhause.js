@@ -125,6 +125,17 @@
     let zeit = null; // aktualisiert_am der zuletzt geholten Zeile
     let laeuft = false;
     let letzte = null; // zuletzt geholte Zeile, zum Neuzeichnen, wenn das Foto ankommt
+    const mindest = mindestSteuerung();
+    let zeichnenOffen = false;
+
+    // Nicht neu zeichnen, solange jemand im Feld „Immer laden bis“ tippt; danach nachholen
+    function neuZeichnen() {
+      if (!letzte) return;
+      if (mindest.el.contains(document.activeElement)) { zeichnenOffen = true; return; }
+      zeichnenOffen = false;
+      zeichnen(inhalt, letzte.werte || {}, letzte.tagesstart || {}, mindest);
+    }
+    mindest.el.addEventListener('focusout', () => setTimeout(() => { if (zeichnenOffen) neuZeichnen(); }, 300));
 
     function standZeigen() {
       if (!zeit) return;
@@ -155,7 +166,7 @@
         }
         zeit = new Date(data.aktualisiert_am);
         letzte = data;
-        zeichnen(inhalt, data.werte || {}, data.tagesstart || {});
+        neuZeichnen();
         standZeigen();
       } catch (e) {
         if (!box.isConnected) return;
@@ -179,11 +190,84 @@
     holen();
     // Foto einmal pro Öffnen nachsehen (geändert oder noch nicht auf dem Gerät)
     autoBildHolen().then((neu) => {
-      if (neu && letzte && box.isConnected) zeichnen(inhalt, letzte.werte || {}, letzte.tagesstart || {});
+      if (neu && letzte && box.isConnected) neuZeichnen();
     }).catch(() => {});
   }
 
-  function zeichnen(ziel, v, start) {
+  // Eingabe „Immer laden bis … %“ (Einstellung wallbox_mindest_soc in Supabase, der Home Assistant holt sie
+  // jede Minute ab). Wird einmal pro Öffnen gebaut, damit Eingaben beim Neuzeichnen nicht verloren gehen.
+  function mindestSteuerung() {
+    const box = el('div', 'ez-mindest');
+    const zeile = el('div', 'zeile');
+    const feld = document.createElement('input');
+    feld.type = 'number';
+    feld.min = '0';
+    feld.max = '100';
+    feld.step = '5';
+    feld.inputMode = 'numeric';
+    feld.setAttribute('aria-label', 'Immer laden bis Prozent');
+    const knopf = el('button', null, 'Speichern');
+    knopf.type = 'button';
+    const rechts = el('div', 'eingabe');
+    rechts.append(feld, el('span', null, '%'), knopf);
+    zeile.append(el('div', null, 'Immer laden bis'), rechts);
+    const erklaerung = el('div', 'text', 'Darunter lädt die Wallbox voll, darüber nur mit Überschuss. 100 % = immer voll, 0 = nur Überschuss.');
+    const meldung = el('div', 'meldung');
+    const zustand = el('div', 'zustand');
+    box.append(zeile, erklaerung, meldung, zustand);
+
+    let gespeichert = null;   // Wert in Supabase
+    let geaendert = false;    // Feld wurde bearbeitet, noch nicht gespeichert
+    let letzte = null;
+    feld.addEventListener('input', () => { geaendert = true; });
+
+    async function laden() {
+      const { data, error } = await window.sb.from('einstellungen').select('wert').eq('name', 'wallbox_mindest_soc').maybeSingle();
+      if (error) { meldung.textContent = 'Einstellung konnte nicht geladen werden: ' + error.message; return; }
+      gespeichert = data ? zahlOderNull(data.wert) : null;
+      if (!geaendert && istZahl(gespeichert)) feld.value = String(gespeichert);
+      if (letzte) aktualisieren(letzte.v, letzte.soc);
+    }
+
+    knopf.addEventListener('click', async () => {
+      meldung.textContent = '';
+      const wert = Number(feld.value);
+      if (feld.value === '' || !isFinite(wert) || wert < 0 || wert > 100) {
+        meldung.textContent = 'Bitte eine Zahl von 0 bis 100 eingeben.';
+        return;
+      }
+      knopf.disabled = true;
+      const { error } = await window.sb.rpc('einstellung_setzen', { p_name: 'wallbox_mindest_soc', p_wert: Math.round(wert) });
+      knopf.disabled = false;
+      if (error) { meldung.textContent = 'Nicht gespeichert: ' + error.message + (error.code ? ' (' + error.code + ')' : ''); return; }
+      geaendert = false;
+      gespeichert = Math.round(wert);
+      feld.value = String(gespeichert);
+      meldung.textContent = 'Gespeichert. Der Home Assistant übernimmt den Wert innerhalb von etwa einer Minute.';
+      if (letzte) aktualisieren(letzte.v, letzte.soc);
+    });
+
+    function aktualisieren(v, soc) {
+      letzte = { v, soc };
+      const ha = zahlOderNull(v.mindest_soc);
+      let text;
+      if (v.volle_ladung === true) text = '„Volle Ladung erzwingen“ ist an und hat gerade Vorrang.';
+      else if (!istZahl(ha)) text = 'Der Home Assistant hat noch keinen Wert gemeldet.';
+      else if (istZahl(gespeichert) && gespeichert !== ha) text = 'Wird übernommen … (im Home Assistant gilt noch ' + zahl(ha, 0) + ' %)';
+      else if (ha === 0) text = 'Aus: Es wird nur mit Überschuss geladen.';
+      else if (v.mindestladung_aktiv === true) {
+        text = istZahl(soc)
+          ? 'Lädt voll bis ' + zahl(ha, 0) + ' % (Auto jetzt ' + zahl(soc, 0) + ' %), danach nur mit Überschuss.'
+          : 'Kein Ladezustand von Mercedes: lädt voll, als wäre das Auto leer.';
+      } else text = zahl(ha, 0) + ' % erreicht: lädt jetzt nur mit Überschuss.';
+      zustand.textContent = text;
+    }
+
+    laden();
+    return { el: box, aktualisieren };
+  }
+
+  function zeichnen(ziel, v, start, mindest) {
     const box = el('div', 'ez');
     const autoSoc = zahlOderNull(v.auto_soc);
 
@@ -295,9 +379,12 @@
     // --- Wallbox ---
     const wb = el('div', 'ez-karte');
     wb.append(el('h2', null, 'Wallbox'));
+    if (mindest) {
+      mindest.aktualisieren(v, autoSoc);
+      wb.append(mindest.el);
+    }
     [
-      ['Winterladen', 'immer mit 16 A laden', v.winterladen],
-      ['Volle Ladung erzwingen', 'einmal voll laden, dann wieder Überschuss', v.volle_ladung]
+      ['Volle Ladung erzwingen', 'einmal voll laden, dann wieder wie eingestellt', v.volle_ladung]
     ].forEach(([name, text, an]) => {
       const zeile = el('label', 'ez-schalter');
       const links = el('div');
@@ -309,7 +396,7 @@
       zeile.append(links, s);
       wb.append(zeile);
     });
-    wb.append(el('div', 'ez-fussnote', 'Schalten aus der App kommt in einem späteren Schritt.'));
+    wb.append(el('div', 'ez-fussnote', '„Volle Ladung erzwingen“ aus der App schalten kommt später.'));
     box.append(wb);
 
     // --- Home Assistant ---
