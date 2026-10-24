@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="pv-stockhalle.css">
   <link rel="stylesheet" href="meldungen.css">
   <link rel="stylesheet" href="stempeln.css">
+  <link rel="stylesheet" href="bahnschwellen.css">
   <style>
     :root {
       --gruen: #2e5d34;
@@ -110,13 +111,15 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v18</footer>
+  <footer>v19</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script src="pv-stockhalle.js"></script>
   <script src="meldungen.js"></script>
   <script src="stempeln.js"></script>
+  <script src="scanner.js"></script>
+  <script src="bahnschwellen.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
     // "link" = Kachel öffnet eine andere Seite direkt.
@@ -125,15 +128,16 @@
       { id: 'energie-biogas', name: 'Energie Biogasanlage', symbol: '⚡' },
       { id: 'getreidelager', name: 'Getreidelager', symbol: '🌾' },
       { id: 'wartung-maschinen', name: 'Wartung Maschinen', symbol: '🚜' },
-      { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛' },
+      { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛', seite: window.zeigeBahnschwellen },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
       { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause },
       { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle },
       { id: 'stempeln', name: 'Stempeln', symbol: '⏱️', seite: window.zeigeStempeln }
     ];
 
-    // Rolle des Angemeldeten (supabase/010_stempeln.sql): chef sieht alles,
-    // mitarbeiter sieht nur „Stempeln“. Für den Start ohne Netz im Gerät gemerkt.
+    // Rolle des Angemeldeten (supabase/010_stempeln.sql, 013_fuhren.sql): chef sieht alles;
+    // alle anderen sehen „Stempeln“ (wenn sie stempeln) und „Bahnschwellen“ (Fahrer, Transportfirma).
+    // Für den Start ohne Netz im Gerät gemerkt.
     const PROFIL_SCHLUESSEL = 'betriebsapp-profil';
     window.Profil = { rolle: 'mitarbeiter' };
     async function profilLaden(offline) {
@@ -146,6 +150,14 @@
       }
     }
     function istChef() { return window.Profil.rolle === 'chef'; }
+    function eigeneBereiche() {
+      if (istChef()) return BEREICHE;
+      const p = window.Profil;
+      const ids = [];
+      if (p.stempelt || !p.fuhren) ids.push('stempeln');
+      if (p.fuhren) ids.push('bahnschwellen');
+      return BEREICHE.filter((b) => ids.includes(b.id));
+    }
 
     const inhalt = document.getElementById('inhalt');
     const titel = document.getElementById('titel');
@@ -155,17 +167,18 @@
     function zeigeStartseite() {
       titel.textContent = 'Betrieb Aumeier';
       zurueck.style.display = 'none';
-      // Mitarbeiter landen direkt beim Stempeln, ohne Kacheln und Meldungen
-      if (!istChef()) {
-        titel.textContent = 'Stempeln';
+      // Mitarbeiter, Fahrer, Transportfirma: nur ihre Bereiche (einer = direkt, sonst Kacheln), ohne Störungen
+      const bereiche = eigeneBereiche();
+      if (!istChef() && bereiche.length === 1) {
+        titel.textContent = bereiche[0].name;
         const s = document.createElement('div');
         inhalt.replaceChildren(s, kontoZeile());
-        window.zeigeStempeln(s);
+        bereiche[0].seite(s);
         return;
       }
       const raster = document.createElement('div');
       raster.className = 'kacheln';
-      for (const b of BEREICHE) {
+      for (const b of bereiche) {
         const a = document.createElement('a');
         a.className = 'kachel';
         if (b.link) {
@@ -194,9 +207,9 @@
         teile.push(o);
       }
       // Offene Störungen oben (wichtig und Hinweise), unten die Karte für Mitteilungen
-      if (!ohneNetz) teile.push(window.Meldungen.leiste());
+      if (!ohneNetz && istChef()) teile.push(window.Meldungen.leiste());
       teile.push(raster);
-      if (!ohneNetz) teile.push(window.Meldungen.karte());
+      if (!ohneNetz && (istChef() || window.Profil.fuhren)) teile.push(window.Meldungen.karte(istChef() ? undefined : 'Mitteilungen zu den Fuhren'));
       teile.push(kontoZeile());
       inhalt.replaceChildren(...teile);
     }
@@ -220,10 +233,10 @@
       return k;
     }
 
-    function zeigeBereich(b) {
+    function zeigeBereich(b, rest) {
       titel.textContent = b.name;
       zurueck.style.display = 'block';
-      if (b.seite) { b.seite(inhalt); return; }
+      if (b.seite) { b.seite(inhalt, rest); return; }
       const p = document.createElement('div');
       p.className = 'platzhalter';
       p.textContent = 'Hier entsteht der Bereich „' + b.name + '“';
@@ -231,15 +244,16 @@
     }
 
     function anzeigen() {
-      const id = location.hash.slice(1);
+      // „#bahnschwellen/123“ = Bereich und Unterseite (z. B. eine Fuhre)
+      const [id, rest] = location.hash.slice(1).split('/');
       if (id === 'kennwort') {
         titel.textContent = 'Kennwort ändern';
         zurueck.style.display = 'block';
         window.Anmeldung.kennwortAendern(inhalt, () => { location.hash = ''; });
         return;
       }
-      const b = istChef() ? BEREICHE.find((x) => x.id === id && !x.link) : null;
-      if (b) zeigeBereich(b); else zeigeStartseite();
+      const b = eigeneBereiche().find((x) => x.id === id && !x.link);
+      if (b) zeigeBereich(b, rest); else zeigeStartseite();
       window.scrollTo(0, 0);
     }
 
@@ -248,7 +262,7 @@
     window.Anmeldung.start(inhalt, async (zustand) => {
       ohneNetz = zustand.offline;
       await profilLaden(ohneNetz);
-      if (!ohneNetz && istChef()) window.Meldungen.auffrischen();
+      if (!ohneNetz && (istChef() || window.Profil.fuhren)) window.Meldungen.auffrischen();
       window.addEventListener('hashchange', anzeigen);
       anzeigen();
     });

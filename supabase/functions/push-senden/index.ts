@@ -1,4 +1,4 @@
-// Edge Function „push-senden“: schickt Web-Push-Mitteilungen an alle angemeldeten Geräte.
+// Edge Function „push-senden“: schickt Web-Push-Mitteilungen an die Geräte der genannten Personen.
 // Aufgerufen nur von der Datenbank (intern.push_ausloesen über pg_net) mit dem Geheimnis
 // `push_ausloeser` im Kopf `x-push-ausloeser`. Schlüssel kommen aus dem Vault (public.push_geheimnisse,
 // nur für service_role). verify_jwt ist aus, die Funktion prüft das Geheimnis selbst.
@@ -19,13 +19,17 @@ Deno.serve(async (req: Request) => {
     if (ge || !g) return antwort(500, { fehler: "Schlüssel nicht lesbar: " + (ge?.message ?? "leer") });
     if (req.headers.get("x-push-ausloeser") !== g.ausloeser) return antwort(401, { fehler: "nicht erlaubt" });
 
-    const { nachrichten, nur_user } = (await req.json()) as { nachrichten: Nachricht[]; nur_user?: string | null };
+    // an_users = nur an diese Personen (seit 013); nur_user = ältere Form für eine Person
+    const { nachrichten, nur_user, an_users } = (await req.json()) as
+      { nachrichten: Nachricht[]; nur_user?: string | null; an_users?: string[] | null };
     if (!Array.isArray(nachrichten) || nachrichten.length === 0) return antwort(200, { gesendet: 0 });
+    if (Array.isArray(an_users) && an_users.length === 0) return antwort(200, { gesendet: 0 });
 
     webpush.setVapidDetails("https://christianaumeier.github.io/betriebs-app/", g.oeffentlich, g.privat);
 
     let abfrage = sb.from("push_abos").select("id, endpoint, p256dh, auth");
-    if (nur_user) abfrage = abfrage.eq("user_id", nur_user);
+    if (Array.isArray(an_users)) abfrage = abfrage.in("user_id", an_users);
+    else if (nur_user) abfrage = abfrage.eq("user_id", nur_user);
     const { data: abos, error: ae } = await abfrage;
     if (ae) return antwort(500, { fehler: "Geräte nicht lesbar: " + ae.message });
 

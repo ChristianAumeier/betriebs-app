@@ -1,4 +1,4 @@
-// Edge Function „konto-anlegen“: Christian oder Carolin legen in der App ein Konto für einen Mitarbeiter an.
+// Edge Function „konto-anlegen“: Christian oder Carolin legen in der App ein Konto an (Mitarbeiter, Fahrer, Transportfirma).
 // Aufruf aus der App (supabase.functions.invoke) mit der Anmeldung des Aufrufers. verify_jwt ist aus,
 // die Funktion prüft selbst, dass der Aufrufer Chef ist und mit Code angemeldet (public.ist_chef),
 // legt das Konto bestätigt an (Trigger trägt es als mitarbeiter ein), setzt den Namen und gibt ein
@@ -34,18 +34,27 @@ Deno.serve(async (req: Request) => {
     if (ce) return antwort(401, { fehler: "Anmeldung nicht gültig: " + ce.message });
     if (chef !== true) return antwort(403, { fehler: "Nur für Christian und Carolin (mit Code angemeldet)" });
 
-    const { email, name } = (await req.json()) as { email?: string; name?: string };
+    // zugang (seit 013): mitarbeiter = nur Stempeln; fahrer = Fuhren, stempelt wie gewählt; transportfirma = nur Fuhren
+    const { email, name, zugang, stempelt } = (await req.json()) as
+      { email?: string; name?: string; zugang?: string; stempelt?: boolean };
     const mail = (email ?? "").trim().toLowerCase();
     const n = (name ?? "").trim();
+    const z = zugang ?? "mitarbeiter";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return antwort(400, { fehler: "E-Mail-Adresse ist ungültig" });
     if (!n) return antwort(400, { fehler: "Bitte einen Namen angeben" });
+    if (!["mitarbeiter", "fahrer", "transportfirma"].includes(z)) return antwort(400, { fehler: "Unbekannter Zugang: " + z });
+    const person = {
+      name: n,
+      fuhren: z === "mitarbeiter" ? null : z,
+      stempelt: z === "mitarbeiter" ? true : z === "transportfirma" ? false : stempelt !== false,
+    };
 
     const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
     const passwort = kennwort();
     const { data: neu, error: ne } = await admin.auth.admin.createUser({ email: mail, password: passwort, email_confirm: true });
     if (ne || !neu?.user) return antwort(400, { fehler: "Konto nicht angelegt: " + (ne?.message ?? "unbekannt") });
 
-    const { error: pe } = await admin.from("personen").update({ name: n }).eq("user_id", neu.user.id);
+    const { error: pe } = await admin.from("personen").update(person).eq("user_id", neu.user.id);
     if (pe) return antwort(500, { fehler: "Konto angelegt, Name nicht gesetzt: " + pe.message, passwort });
 
     return antwort(200, { passwort, email: mail });

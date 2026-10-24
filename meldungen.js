@@ -138,9 +138,10 @@
   }
 
   // ---------- Karte „Mitteilungen“ für die Startseite ----------
-  function karte() {
+  // titel: für Fahrer und Transportfirma ein anderer (die bekommen keine Störungen, sondern Fuhren)
+  function karte(titel) {
     const k = el('div', 'ml-karte');
-    k.append(el('div', 'titel', 'Mitteilungen bei wichtigen Störungen'));
+    k.append(el('div', 'titel', titel || 'Mitteilungen bei wichtigen Störungen'));
     const zustand = el('div', 'zustand', '…');
     const knoepfe = el('div', 'knoepfe');
     const meldung = el('div');
@@ -172,7 +173,7 @@
       let sub = null;
       try { sub = await abo(); } catch (e) { /* kein Service Worker */ }
       if (sub && Notification.permission === 'granted') {
-        zustand.textContent = 'An: Dieses Gerät bekommt wichtige Störungen als Mitteilung.';
+        zustand.textContent = titel ? 'An: Dieses Gerät bekommt Mitteilungen.' : 'An: Dieses Gerät bekommt wichtige Störungen als Mitteilung.';
         knoepfe.append(
           knopf('Testmitteilung senden', async () => {
             const { error } = await window.sb.rpc('push_test');
