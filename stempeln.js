@@ -1,6 +1,8 @@
 // Bereich „Stempeln“: Arbeitszeiten der Mitarbeiter (supabase/010_stempeln.sql).
-// Mitarbeiter: Start, Pause, Weiter, Stopp; vergessene Zeiten nachtragen (wartet auf Freigabe).
-// Chef (Christian, Carolin): wer gerade arbeitet, Nachträge freigeben, Stunden je Monat, Liste fürs Lohnbüro.
+// Mitarbeiter: Start, Pause, Weiter, Stopp; vergessene Zeiten nachtragen (wartet auf Freigabe);
+// kurz eintragen, was am Tag gemacht wurde (supabase/011_taetigkeiten.sql).
+// Chef (Christian, Carolin): wer gerade arbeitet, Nachträge freigeben, Stunden je Monat, Liste fürs Lohnbüro,
+// Konten für Mitarbeiter anlegen (Edge Function konto-anlegen).
 // Stempel werden nie gelöscht oder geändert; die Zeit beim Knopfdruck setzt der Server.
 
 (function () {
@@ -84,7 +86,14 @@
     return Object.values(tage).sort((a, b) => (a.tag < b.tag ? -1 : 1));
   }
 
-  function tagesZeile(t) {
+  // Tätigkeiten → { 'user|2026-10-24': 'Text' }, die neueste Eintragung je Tag gilt
+  function taetigkeitenNach(liste) {
+    const m = {};
+    liste.slice().sort((a, b) => a.id - b.id).forEach((x) => { m[x.user_id + '|' + x.tag] = x.text; });
+    return m;
+  }
+
+  function tagesZeile(t, taetigkeit) {
     const z = el('div', 'st-tag' + (t.stoppFehlt ? ' warnung' : ''));
     const zeit = uhr(t.beginn) + ' – ' + (t.ende ? uhr(t.ende) : t.laeuft ? 'läuft' : '?');
     z.append(el('span', 'datum', datumKurz(t.tag)), el('span', 'zeit', zeit),
@@ -95,6 +104,7 @@
     if (t.offen) marken.push('Nachtrag wartet auf Freigabe');
     else if (t.nachtrag) marken.push('mit Nachtrag');
     if (marken.length) z.append(el('span', 'marke', marken.join(' · ')));
+    if (taetigkeit) z.append(el('span', 'taetigkeit', taetigkeit));
     return z;
   }
 
@@ -153,20 +163,56 @@
     const box = el('div', 'st');
     const oben = el('div', 'st');
     const liste = el('div', 'st');
-    box.append(oben, nachtragFormular(null, () => holen()), liste);
+    let uid = null;
+    let taetigkeiten = {};
+    const tk = taetigkeitKarte();
+    box.append(oben, tk.karte, nachtragFormular(null, () => holen()), liste);
     ziel.replaceChildren(box);
     let laeuft = false;
+
+    // „Was hast du gemacht?“ – freier Text, für heute oder einen Tag davor
+    function taetigkeitKarte() {
+      const f = el('form', 'st-karte st-formular');
+      f.append(el('h3', null, 'Was hast du gemacht?'));
+      const datum = el('input'); datum.type = 'date'; datum.value = tagVon(new Date()); datum.max = datum.value; datum.required = true;
+      const text = el('textarea'); text.rows = 2; text.maxLength = 500; text.required = true;
+      text.placeholder = 'z. B. Feld gegrubbert, Maschinen gewaschen';
+      const l1 = el('label', null, 'Tag'); l1.append(datum);
+      const l2 = el('label', null, 'Tätigkeit'); l2.append(text);
+      const knopf = el('button', null, 'Speichern'); knopf.type = 'submit';
+      const meldung = el('div');
+      f.append(l1, l2, knopf, meldung);
+      let geaendert = false;
+      text.addEventListener('input', () => { geaendert = true; });
+      datum.addEventListener('change', () => { geaendert = false; fuellen(); meldung.replaceChildren(); });
+      function fuellen() { if (!geaendert && document.activeElement !== text) text.value = taetigkeiten[uid + '|' + datum.value] || ''; }
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        knopf.disabled = true;
+        const { error } = await window.sb.rpc('taetigkeit_speichern', { p_tag: datum.value, p_text: text.value });
+        knopf.disabled = false;
+        if (error) { meldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
+        geaendert = false;
+        meldung.replaceChildren(el('div', 'st-hinweis ok', 'Gespeichert.'));
+        holen();
+      });
+      return { karte: f, fuellen, text, datum };
+    }
 
     async function holen() {
       if (laeuft) return;
       laeuft = true;
       try {
         const ab = new Date(); ab.setDate(1); ab.setHours(0, 0, 0, 0); ab.setDate(ab.getDate() - 3);
-        const uid = (await window.sb.auth.getUser()).data.user.id;
-        const { data, error } = await window.sb.from('stempel').select('*').eq('user_id', uid)
-          .gte('zeit', ab.toISOString()).order('zeit');
-        if (error) throw error;
-        zeichnen(data || []);
+        uid = uid || (await window.sb.auth.getUser()).data.user.id;
+        const [s, t] = await Promise.all([
+          window.sb.from('stempel').select('*').eq('user_id', uid).gte('zeit', ab.toISOString()).order('zeit'),
+          window.sb.from('taetigkeiten').select('id, user_id, tag, text').eq('user_id', uid).gte('tag', tagVon(ab)).order('id')
+        ]);
+        if (s.error || t.error) throw s.error || t.error;
+        taetigkeiten = taetigkeitenNach(t.data || []);
+        tk.fuellen();
+        zeichnen(s.data || []);
       } catch (e) {
         oben.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
       } finally { laeuft = false; }
@@ -176,7 +222,13 @@
       knopf.disabled = true;
       const { error } = await window.sb.rpc('stempeln', { p_art: art });
       if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; return; }
-      holen();
+      await holen();
+      // Nach Feierabend an die Tätigkeit erinnern
+      if (art === 'stopp' && !taetigkeiten[uid + '|' + tagVon(new Date())]) {
+        tk.datum.value = tagVon(new Date());
+        oben.append(el('div', 'st-hinweis', 'Feierabend gestempelt. Bitte noch kurz eintragen, was du heute gemacht hast.'));
+        tk.text.focus();
+      }
     }
 
     function zeichnen(stempel) {
@@ -206,7 +258,7 @@
       const k = el('div', 'st-karte');
       k.append(el('h3', null, 'Meine Zeiten im ' + new Date().toLocaleDateString('de-DE', { month: 'long' })));
       k.append(el('div', 'st-summe', 'Zusammen: ' + stunden(imMonat.reduce((s, t) => s + t.arbeitMs, 0))));
-      imMonat.slice().reverse().forEach((t) => k.append(tagesZeile(t)));
+      imMonat.slice().reverse().forEach((t) => k.append(tagesZeile(t, taetigkeiten[uid + '|' + t.tag])));
       const abgelehnt = stempel.filter((s) => s.status === 'abgelehnt');
       abgelehnt.forEach((s) => k.append(el('div', 'st-hinweis', 'Nachtrag abgelehnt: ' + ARTEN[s.art] + ' ' + wannText(s.zeit))));
       if (!imMonat.length) k.append(el('p', 'klein', 'Noch keine Zeiten in diesem Monat.'));
@@ -223,6 +275,10 @@
     let jahr = jetzt.getFullYear(), monat = jetzt.getMonth();
     let laeuft = false;
     ziel.replaceChildren(box);
+    // Formulare nur einmal bauen, damit Eingaben das minütliche Neuladen überstehen
+    const kontoKarte = kontoFormular(() => holen());
+    let nachtragKarte = null, nachtragFuer = '';
+    const offen = new Set(); // aufgeklappte Personen im Monat
 
     async function holen() {
       if (laeuft) return;
@@ -231,22 +287,23 @@
         const von = new Date(jahr, monat, 1); von.setDate(von.getDate() - 2);
         const bis = new Date(jahr, monat + 1, 1); bis.setDate(bis.getDate() + 1);
         const kurz = new Date(); kurz.setDate(kurz.getDate() - 14);
-        const [p, m, k, o] = await Promise.all([
+        const [p, m, k, o, t] = await Promise.all([
           window.sb.from('personen').select('user_id, name, stempelt').eq('stempelt', true).order('name'),
           window.sb.from('stempel').select('*').gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').gte('zeit', kurz.toISOString()).order('zeit'),
-          window.sb.from('stempel').select('*').eq('status', 'offen').order('zeit')
+          window.sb.from('stempel').select('*').eq('status', 'offen').order('zeit'),
+          window.sb.from('taetigkeiten').select('id, user_id, tag, text').gte('tag', tagVon(von)).lt('tag', tagVon(bis)).order('id')
         ]);
-        const fehler = p.error || m.error || k.error || o.error;
+        const fehler = p.error || m.error || k.error || o.error || t.error;
         if (fehler) throw fehler;
         if (!box.isConnected) return;
-        zeichnen(p.data || [], m.data || [], k.data || [], o.data || []);
+        zeichnen(p.data || [], m.data || [], k.data || [], o.data || [], taetigkeitenNach(t.data || []));
       } catch (e) {
         box.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
       } finally { laeuft = false; }
     }
 
-    function zeichnen(personen, imMonat, kuerzlich, offene) {
+    function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten) {
       const name = {};
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
@@ -315,14 +372,17 @@
           .filter((t) => t.tag.startsWith(praefix));
         const summe = tage.reduce((s, t) => s + t.arbeitMs, 0);
         const d = el('details', 'st-monat');
+        d.open = offen.has(p.user_id);
+        d.addEventListener('toggle', () => { if (d.open) offen.add(p.user_id); else offen.delete(p.user_id); });
         const sum = el('summary');
         sum.append(el('span', 'name', p.name), el('span', 'klein', tage.length + (tage.length === 1 ? ' Tag' : ' Tage')), el('span', 'std', stunden(summe)));
         if (tage.some((t) => t.stoppFehlt)) sum.append(el('span', 'marke', 'Stopp fehlt'));
         d.append(sum);
         tage.forEach((t) => {
-          d.append(tagesZeile(t));
+          const taetigkeit = taetigkeiten[p.user_id + '|' + t.tag] || '';
+          d.append(tagesZeile(t, taetigkeit));
           export_.push([p.name, t.tag.split('-').reverse().join('.'), uhr(t.beginn), t.ende ? uhr(t.ende) : '',
-            dezimal(t.pauseMs), dezimal(t.arbeitMs), [t.stoppFehlt ? 'Stopp fehlt' : '', t.nachtrag ? 'Nachtrag' : ''].filter(Boolean).join(', ')]);
+            dezimal(t.pauseMs), dezimal(t.arbeitMs), taetigkeit, [t.stoppFehlt ? 'Stopp fehlt' : '', t.nachtrag ? 'Nachtrag' : ''].filter(Boolean).join(', ')]);
         });
         if (!tage.length) d.append(el('p', 'klein', 'Keine Zeiten in diesem Monat.'));
         mk.append(d);
@@ -334,16 +394,56 @@
       }
       teile.push(mk);
 
-      if (personen.length) teile.push(nachtragFormular(personen, () => holen()));
+      const fuer = personen.map((p) => p.user_id + p.name).join();
+      if (fuer !== nachtragFuer) { nachtragFuer = fuer; nachtragKarte = personen.length ? nachtragFormular(personen, () => holen()) : null; }
+      if (nachtragKarte) teile.push(nachtragKarte);
+      teile.push(kontoKarte);
       box.replaceChildren(...teile);
     }
 
     regelmaessig(box, holen);
   }
 
+  // Konto für einen Mitarbeiter anlegen; das vorläufige Kennwort wird nur hier einmal gezeigt
+  function kontoFormular(fertig) {
+    const d = el('details', 'st-karte st-formular');
+    d.append(el('summary', null, 'Konto für Mitarbeiter anlegen'));
+    const f = el('form', 'st');
+    const name = el('input'); name.type = 'text'; name.required = true; name.placeholder = 'Vor- und Nachname';
+    const mail = el('input'); mail.type = 'email'; mail.required = true; mail.autocapitalize = 'off'; mail.placeholder = 'name@beispiel.de';
+    const l1 = el('label', null, 'Name'); l1.append(name);
+    const l2 = el('label', null, 'E-Mail'); l2.append(mail);
+    const knopf = el('button', null, 'Konto anlegen'); knopf.type = 'submit';
+    const meldung = el('div', 'st');
+    f.append(el('p', 'klein', 'Der Mitarbeiter sieht danach nur „Stempeln“. Beim ersten Anmelden richtet er den 6-stelligen Code ein; das Kennwort kann er danach unten über „Kennwort ändern“ ersetzen.'),
+      l1, l2, knopf, meldung);
+    d.append(f);
+    f.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      knopf.disabled = true;
+      meldung.replaceChildren();
+      const { data, error } = await window.sb.functions.invoke('konto-anlegen', { body: { name: name.value, email: mail.value } });
+      knopf.disabled = false;
+      let fehler = data && data.fehler;
+      if (error && !fehler) {
+        try { fehler = (await error.context.json()).fehler; } catch (e) { fehler = fehlerText(error); }
+      }
+      if (fehler) { meldung.replaceChildren(el('div', 'st-hinweis fehler', fehler)); return; }
+      const k = el('div', 'st-hinweis ok');
+      k.append(el('div', null, 'Konto angelegt für ' + name.value + ' (' + data.email + ').'),
+        el('div', null, 'Vorläufiges Kennwort (nur jetzt sichtbar, bitte weitergeben):'),
+        el('div', 'st-kennwort', data.passwort),
+        el('div', null, 'Anmelden unter christianaumeier.github.io/betriebs-app'));
+      meldung.replaceChildren(k);
+      name.value = ''; mail.value = '';
+      fertig();
+    });
+    return d;
+  }
+
   // CSV für Excel (Semikolon, deutsche Kommazahlen, UTF-8 mit BOM)
   function herunterladen(zeilen, dateiname) {
-    const kopf = ['Name', 'Datum', 'Beginn', 'Ende', 'Pause (Std.)', 'Arbeitszeit (Std.)', 'Hinweis'];
+    const kopf = ['Name', 'Datum', 'Beginn', 'Ende', 'Pause (Std.)', 'Arbeitszeit (Std.)', 'Tätigkeit', 'Hinweis'];
     const text = [kopf].concat(zeilen).map((z) => z.map((f) => '"' + String(f).replace(/"/g, '""') + '"').join(';')).join('\r\n');
     const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
     const a = el('a');

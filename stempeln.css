@@ -95,3 +95,14 @@
 .st-monat summary .std { font-weight: 700; }
 .st-monat summary .marke { font-size: 0.75rem; color: #8a1c1c; }
 .punkt.alt { background: #d64545; }
+.st-tag .taetigkeit { grid-column: 1 / -1; font-size: 0.8rem; color: var(--text); }
+.st-formular textarea {
+  font: inherit;
+  padding: 10px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: #fff;
+  resize: vertical;
+}
+.st-formular summary { font-weight: 700; cursor: pointer; }
+.st-kennwort { font-family: ui-monospace, Consolas, monospace; font-size: 1.2rem; font-weight: 700; letter-spacing: 0.05em; user-select: all; margin: 4px 0; }
