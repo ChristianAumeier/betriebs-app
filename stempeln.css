@@ -90,7 +90,11 @@
 
 .st-monatkopf { display: flex; align-items: center; justify-content: space-between; }
 .st-pfeil { font: inherit; font-size: 1.4rem; border: 0; background: none; color: var(--gruen); padding: 0 12px; cursor: pointer; }
-.st-monat summary { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; cursor: pointer; border-top: 1px solid #eceee8; }
+.st-monat summary { display: block; list-style: none; padding: 8px 0; cursor: pointer; border-top: 1px solid #eceee8; }
+.st-monat summary::-webkit-details-marker { display: none; }
+.st-monat summary .zeile { display: flex; gap: 10px; align-items: baseline; }
+.st-monat summary .zeile::before { content: '▸'; color: var(--grau); }
+.st-monat[open] summary .zeile::before { content: '▾'; }
 .st-monat summary .name { font-weight: 600; flex: 1; }
 .st-monat summary .std { font-weight: 700; }
 .st-monat summary .marke { font-size: 0.75rem; color: #8a1c1c; }
@@ -109,3 +113,4 @@
 /* iPhone: Datum und Uhrzeit sonst abgeschnitten */
 .st-formular input[type=date], .st-formular input[type=time] { -webkit-appearance: none; appearance: none; display: block; width: 100%; text-align: left; line-height: 1.3; }
 .st-status .st-formular { text-align: left; margin-top: 6px; }
+.st-vorschau { display: flex; flex-direction: column; gap: 8px; background: #e8f0fb; color: #1d3c6b; }

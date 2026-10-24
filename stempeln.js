@@ -54,14 +54,14 @@
     let z = 'aus', tag = null, abschnitt = 0, pauseAb = 0;
     function zu(s) {
       const t = tagVon(s.zeit);
-      if (!tage[t]) tage[t] = { tag: t, beginn: s.zeit, ende: null, arbeitMs: 0, pauseMs: 0, nachtrag: false, offen: false, stoppFehlt: false, laeuft: false };
+      if (!tage[t]) tage[t] = { tag: t, beginn: s.zeit, ende: null, arbeitMs: 0, pauseMs: 0, nachtrag: false, offen: false, stoppFehlt: false, laeuft: false, schichten: 0 };
       return tage[t];
     }
     for (const s of liste) {
       const ms = new Date(s.zeit).getTime();
       if (s.art === 'start' || (s.art === 'weiter' && z === 'aus')) {
         if (z !== 'aus' && tag) tag.stoppFehlt = true;
-        tag = zu(s); z = 'arbeitet'; abschnitt = ms;
+        tag = zu(s); tag.schichten++; z = 'arbeitet'; abschnitt = ms;
       } else if (!tag) {
         continue; // Pause/Stopp ohne Start davor
       } else if (s.art === 'pause' && z === 'arbeitet') {
@@ -101,6 +101,7 @@
       el('span', 'std', stunden(t.arbeitMs)));
     const marken = [];
     if (t.stoppFehlt) marken.push('Stopp fehlt');
+    if (t.schichten > 1) marken.push(t.schichten + '× gestartet (Unterbrechung zählt nicht)');
     if (t.offen) marken.push('Nachtrag wartet auf Freigabe');
     else if (t.nachtrag) marken.push('mit Nachtrag');
     if (marken.length) z.append(el('span', 'marke', marken.join(' · ')));
@@ -110,7 +111,8 @@
 
   // Formular „Zeit nachtragen“; personen = null → für sich selbst
   // Eingeklappt, damit im Alltag nur die Knöpfe zu sehen sind
-  function nachtragFormular(personen, fertig) {
+  function nachtragFormular(personen, fertig, db) {
+    const sb = db || window.sb;
     const d = el('details', 'st-karte st-formular');
     d.append(el('summary', null, personen ? 'Zeit für jemanden eintragen' : 'Vergessen zu stempeln? Hier nachtragen'));
     const f = el('form', 'st');
@@ -149,10 +151,10 @@
       meldung.replaceChildren();
       const wann = new Date(datum.value + 'T' + zeit.value);
       if (!personen && art.value === 'stopp') {
-        const t = await window.sb.rpc('taetigkeit_speichern', { p_tag: datum.value, p_text: taetigkeit.value });
+        const t = await sb.rpc('taetigkeit_speichern', { p_tag: datum.value, p_text: taetigkeit.value });
         if (t.error) { knopf.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
       }
-      const { error } = await window.sb.rpc('stempel_nachtragen', {
+      const { error } = await sb.rpc('stempel_nachtragen', {
         p_art: art.value, p_zeit: wann.toISOString(), p_grund: grund.value, p_user: wer ? wer.value : null
       });
       knopf.disabled = false;
@@ -178,7 +180,9 @@
   // ---------- Mitarbeiter ----------
   // Oben nur der Zustand und die Knöpfe; die Uhrzeit setzt beim Drücken der Server.
   // Vor dem Stopp muss eingetragen sein, was an dem Arbeitstag gemacht wurde.
-  function zeigeMitarbeiter(ziel) {
+  // db = Datenquelle; ohne Angabe die echte Datenbank, sonst die Vorschau (siehe vorschauDb)
+  function zeigeMitarbeiter(ziel, db) {
+    const sb = db || window.sb;
     const box = el('div', 'st');
     const oben = el('div', 'st');
     const liste = el('div', 'st');
@@ -187,7 +191,7 @@
     let schichtTag = null;      // Tag, an dem die laufende Schicht begann
     let stoppFragen = false;    // Feld „Was hast du gemacht?“ ist offen
     const stopp = stoppFormular();
-    box.append(oben, nachtragFormular(null, () => holen()), liste);
+    box.append(oben, nachtragFormular(null, () => holen(), sb), liste);
     ziel.replaceChildren(box);
     let laeuft = false;
 
@@ -208,9 +212,9 @@
         ev.preventDefault();
         ok.disabled = true;
         meldung.replaceChildren();
-        const t = await window.sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
+        const t = await sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
         if (t.error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
-        const { error } = await window.sb.rpc('stempeln', { p_art: 'stopp' });
+        const { error } = await sb.rpc('stempeln', { p_art: 'stopp' });
         ok.disabled = false;
         if (error) { meldung.replaceChildren(fehlerKasten('Stopp hat nicht geklappt', error)); return; }
         stoppFragen = false;
@@ -225,10 +229,10 @@
       laeuft = true;
       try {
         const ab = new Date(); ab.setDate(1); ab.setHours(0, 0, 0, 0); ab.setDate(ab.getDate() - 3);
-        uid = uid || (await window.sb.auth.getUser()).data.user.id;
+        uid = uid || (await sb.auth.getUser()).data.user.id;
         const [s, t] = await Promise.all([
-          window.sb.from('stempel').select('*').eq('user_id', uid).gte('zeit', ab.toISOString()).order('zeit'),
-          window.sb.from('taetigkeiten').select('id, user_id, tag, text').eq('user_id', uid).gte('tag', tagVon(ab)).order('id')
+          sb.from('stempel').select('*').eq('user_id', uid).gte('zeit', ab.toISOString()).order('zeit'),
+          sb.from('taetigkeiten').select('id, user_id, tag, text').eq('user_id', uid).gte('tag', tagVon(ab)).order('id')
         ]);
         if (s.error || t.error) throw s.error || t.error;
         taetigkeiten = taetigkeitenNach(t.data || []);
@@ -247,7 +251,7 @@
         return;
       }
       knopf.disabled = true;
-      const { error } = await window.sb.rpc('stempeln', { p_art: art });
+      const { error } = await sb.rpc('stempeln', { p_art: art });
       if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; return; }
       holen();
     }
@@ -299,6 +303,73 @@
     regelmaessig(box, holen);
   }
 
+  // ---------- Vorschau ----------
+  // Für den Chef: die Mitarbeiter-Ansicht zum Ausprobieren. Alles bleibt im Speicher des Geräts
+  // und ist beim Verlassen weg; die Regeln sind dieselben wie in der Datenbank (012_stopp_mit_taetigkeit).
+  function vorschauDb() {
+    const uid = 'vorschau';
+    const stempel = [], taetigkeiten = [];
+    let id = 0;
+    const tag = (d) => tagVon(new Date(Date.now() - d * 86400000));
+    function stempelDazu(art, zeit, extra) { stempel.push(Object.assign({ id: ++id, user_id: uid, art, zeit, status: 'gueltig', nachtrag: false }, extra)); }
+    // zwei Beispieltage
+    [[2, '06:30', '17:15', 'Meißeliert'], [1, '07:00', '16:45', 'Maschinen gewaschen']].forEach(([d, von, bis, text]) => {
+      stempelDazu('start', new Date(tag(d) + 'T' + von).toISOString());
+      stempelDazu('stopp', new Date(tag(d) + 'T' + bis).toISOString());
+      taetigkeiten.push({ id: ++id, user_id: uid, tag: tag(d), text });
+    });
+    const fehler = (message) => ({ error: { message } });
+    const abfrage = (zeilen) => {
+      const o = { select: () => o, eq: () => o, gte: () => o, lt: () => o, order: () => o,
+        then: (f) => Promise.resolve({ data: zeilen.slice(), error: null }).then(f) };
+      return o;
+    };
+    return {
+      auth: { getUser: async () => ({ data: { user: { id: uid } } }) },
+      from: (t) => abfrage(t === 'taetigkeiten' ? taetigkeiten : stempel),
+      rpc: async (name, a) => {
+        if (name === 'taetigkeit_speichern') {
+          if (!String(a.p_text || '').trim()) return fehler('Bitte etwas eintragen');
+          taetigkeiten.push({ id: ++id, user_id: uid, tag: a.p_tag, text: a.p_text.trim() });
+          return { error: null };
+        }
+        if (name === 'stempeln') {
+          const z = zustand(stempel).art;
+          const ok = (z === 'aus' && a.p_art === 'start') || (z === 'arbeitet' && ['pause', 'stopp'].includes(a.p_art)) ||
+            (z === 'pause' && ['weiter', 'stopp'].includes(a.p_art));
+          if (!ok) return fehler('Das passt gerade nicht. Bitte die Seite neu laden.');
+          if (a.p_art === 'stopp') {
+            const starts = stempel.filter((x) => x.art === 'start' && x.status !== 'abgelehnt');
+            const t = tagVon(starts[starts.length - 1].zeit);
+            if (!taetigkeiten.some((x) => x.tag === t)) return fehler('Bitte zuerst eintragen, was du heute gemacht hast');
+          }
+          stempelDazu(a.p_art, new Date().toISOString());
+          return { error: null };
+        }
+        if (name === 'stempel_nachtragen') {
+          if (new Date(a.p_zeit) > new Date()) return fehler('Die Zeit liegt in der Zukunft');
+          stempelDazu(a.p_art, a.p_zeit, { nachtrag: true, grund: a.p_grund, status: 'offen' });
+          return { error: null };
+        }
+        return fehler('In der Vorschau nicht möglich');
+      }
+    };
+  }
+
+  function zeigeVorschau(ziel, zurueck) {
+    const kopf = el('div', 'st-hinweis st-vorschau');
+    kopf.append(el('div', null, 'Vorschau: So sieht ein Mitarbeiter die App. Probier alles aus – nichts wird gespeichert.'));
+    const ende = el('button', 'st-knopf leise', 'Vorschau beenden');
+    ende.addEventListener('click', () => { box.remove(); zurueck(); });
+    kopf.append(ende);
+    const inhalt = el('div');
+    const box = el('div', 'st');
+    box.append(kopf, inhalt);
+    ziel.replaceChildren(box);
+    zeigeMitarbeiter(inhalt, vorschauDb());
+    window.scrollTo(0, 0);
+  }
+
   // ---------- Chef ----------
   function zeigeChef(ziel) {
     const box = el('div', 'st');
@@ -310,6 +381,8 @@
     const kontoKarte = kontoFormular(() => holen());
     let nachtragKarte = null, nachtragFuer = '';
     const offen = new Set(); // aufgeklappte Personen im Monat
+    const vorschauKnopf = el('button', 'st-knopf leise', 'Mitarbeiter-Ansicht ausprobieren');
+    vorschauKnopf.addEventListener('click', () => zeigeVorschau(ziel, () => zeigeChef(ziel)));
 
     async function holen() {
       if (laeuft) return;
@@ -339,6 +412,7 @@
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
 
+      teile.push(vorschauKnopf);
       if (!personen.length) {
         teile.push(el('div', 'st-hinweis', 'Noch keine Mitarbeiter angelegt. Unten über „Konto für Mitarbeiter anlegen“ hinzufügen.'));
       }
@@ -406,8 +480,10 @@
         d.open = offen.has(p.user_id);
         d.addEventListener('toggle', () => { if (d.open) offen.add(p.user_id); else offen.delete(p.user_id); });
         const sum = el('summary');
-        sum.append(el('span', 'name', p.name), el('span', 'klein', tage.length + (tage.length === 1 ? ' Tag' : ' Tage')), el('span', 'std', stunden(summe)));
-        if (tage.some((t) => t.stoppFehlt)) sum.append(el('span', 'marke', 'Stopp fehlt'));
+        const zeile = el('div', 'zeile');
+        zeile.append(el('span', 'name', p.name), el('span', 'klein', tage.length + (tage.length === 1 ? ' Tag' : ' Tage')), el('span', 'std', stunden(summe)));
+        if (tage.some((t) => t.stoppFehlt)) zeile.append(el('span', 'marke', 'Stopp fehlt'));
+        sum.append(zeile);
         d.append(sum);
         tage.forEach((t) => {
           const taetigkeit = taetigkeiten[p.user_id + '|' + t.tag] || '';
