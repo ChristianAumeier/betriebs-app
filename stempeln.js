@@ -109,10 +109,13 @@
   }
 
   // Formular „Zeit nachtragen“; personen = null → für sich selbst
+  // Eingeklappt, damit im Alltag nur die Knöpfe zu sehen sind
   function nachtragFormular(personen, fertig) {
-    const f = el('form', 'st-karte st-formular');
-    f.append(el('h3', null, personen ? 'Zeit eintragen (gilt sofort)' : 'Zeit nachtragen'));
-    if (!personen) f.append(el('p', 'klein', 'Vergessen zu stempeln? Hier eintragen. Der Nachtrag gilt, sobald Christian ihn freigibt.'));
+    const d = el('details', 'st-karte st-formular');
+    d.append(el('summary', null, personen ? 'Zeit für jemanden eintragen' : 'Vergessen zu stempeln? Hier nachtragen'));
+    const f = el('form', 'st');
+    d.append(f);
+    f.append(el('p', 'klein', personen ? 'Gilt sofort und wird als Nachtrag markiert.' : 'Der Nachtrag gilt, sobald Christian ihn freigibt.'));
     let wer = null;
     if (personen) {
       wer = el('select');
@@ -127,6 +130,16 @@
     [['Was', art], ['Tag', datum], ['Uhrzeit', zeit], ['Grund', grund]].forEach(([t, feld]) => {
       const l = el('label', null, t); l.append(feld); f.append(l);
     });
+    // Mitarbeiter, der den Stopp nachträgt: auch eintragen, was an dem Tag gemacht wurde
+    const taetigkeit = el('textarea'); taetigkeit.rows = 2; taetigkeit.maxLength = 500;
+    taetigkeit.placeholder = 'z. B. meißeliert, Maschinen gewaschen';
+    const lt = el('label', null, 'Was hast du an dem Tag gemacht?'); lt.append(taetigkeit);
+    if (!personen) {
+      f.append(lt);
+      const zeigen = () => { const ja = art.value === 'stopp'; lt.style.display = ja ? '' : 'none'; taetigkeit.required = ja; };
+      art.addEventListener('change', zeigen);
+      zeigen();
+    }
     const knopf = el('button', null, personen ? 'Eintragen' : 'Nachtrag senden'); knopf.type = 'submit';
     const meldung = el('div');
     f.append(knopf, meldung);
@@ -135,16 +148,20 @@
       knopf.disabled = true;
       meldung.replaceChildren();
       const wann = new Date(datum.value + 'T' + zeit.value);
+      if (!personen && art.value === 'stopp') {
+        const t = await window.sb.rpc('taetigkeit_speichern', { p_tag: datum.value, p_text: taetigkeit.value });
+        if (t.error) { knopf.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+      }
       const { error } = await window.sb.rpc('stempel_nachtragen', {
         p_art: art.value, p_zeit: wann.toISOString(), p_grund: grund.value, p_user: wer ? wer.value : null
       });
       knopf.disabled = false;
       if (error) { meldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
-      grund.value = ''; zeit.value = '';
+      grund.value = ''; zeit.value = ''; taetigkeit.value = '';
       meldung.replaceChildren(el('div', 'st-hinweis ok', personen ? 'Eingetragen.' : 'Gesendet. Wartet auf Freigabe.'));
       fertig();
     });
-    return f;
+    return d;
   }
 
   // Wiederholt laden, solange die Ansicht offen und sichtbar ist
@@ -159,44 +176,48 @@
   }
 
   // ---------- Mitarbeiter ----------
+  // Oben nur der Zustand und die Knöpfe; die Uhrzeit setzt beim Drücken der Server.
+  // Vor dem Stopp muss eingetragen sein, was an dem Arbeitstag gemacht wurde.
   function zeigeMitarbeiter(ziel) {
     const box = el('div', 'st');
     const oben = el('div', 'st');
     const liste = el('div', 'st');
     let uid = null;
     let taetigkeiten = {};
-    const tk = taetigkeitKarte();
-    box.append(oben, tk.karte, nachtragFormular(null, () => holen()), liste);
+    let schichtTag = null;      // Tag, an dem die laufende Schicht begann
+    let stoppFragen = false;    // Feld „Was hast du gemacht?“ ist offen
+    const stopp = stoppFormular();
+    box.append(oben, nachtragFormular(null, () => holen()), liste);
     ziel.replaceChildren(box);
     let laeuft = false;
 
-    // „Was hast du gemacht?“ – freier Text, für heute oder einen Tag davor
-    function taetigkeitKarte() {
-      const f = el('form', 'st-karte st-formular');
-      f.append(el('h3', null, 'Was hast du gemacht?'));
-      const datum = el('input'); datum.type = 'date'; datum.value = tagVon(new Date()); datum.max = datum.value; datum.required = true;
-      const text = el('textarea'); text.rows = 2; text.maxLength = 500; text.required = true;
-      text.placeholder = 'z. B. Feld gegrubbert, Maschinen gewaschen';
-      const l1 = el('label', null, 'Tag'); l1.append(datum);
-      const l2 = el('label', null, 'Tätigkeit'); l2.append(text);
-      const knopf = el('button', null, 'Speichern'); knopf.type = 'submit';
+    // Einmal gebaut, damit der Text das minütliche Neuladen übersteht
+    function stoppFormular() {
+      const f = el('form', 'st st-formular');
+      const text = el('textarea'); text.rows = 3; text.maxLength = 500; text.required = true;
+      text.placeholder = 'z. B. meißeliert, Maschinen gewaschen, Feldarbeiten';
+      const l = el('label', null, 'Was hast du heute gemacht?'); l.append(text);
+      const knoepfe = el('div', 'st-knoepfe klein');
+      const ok = el('button', 'st-knopf stopp', 'Speichern und Stopp'); ok.type = 'submit';
+      const zurueck = el('button', 'st-knopf leise', 'Abbrechen'); zurueck.type = 'button';
+      knoepfe.append(zurueck, ok);
       const meldung = el('div');
-      f.append(l1, l2, knopf, meldung);
-      let geaendert = false;
-      text.addEventListener('input', () => { geaendert = true; });
-      datum.addEventListener('change', () => { geaendert = false; fuellen(); meldung.replaceChildren(); });
-      function fuellen() { if (!geaendert && document.activeElement !== text) text.value = taetigkeiten[uid + '|' + datum.value] || ''; }
+      f.append(l, knoepfe, meldung);
+      zurueck.addEventListener('click', () => { stoppFragen = false; meldung.replaceChildren(); holen(); });
       f.addEventListener('submit', async (ev) => {
         ev.preventDefault();
-        knopf.disabled = true;
-        const { error } = await window.sb.rpc('taetigkeit_speichern', { p_tag: datum.value, p_text: text.value });
-        knopf.disabled = false;
-        if (error) { meldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
-        geaendert = false;
-        meldung.replaceChildren(el('div', 'st-hinweis ok', 'Gespeichert.'));
+        ok.disabled = true;
+        meldung.replaceChildren();
+        const t = await window.sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
+        if (t.error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+        const { error } = await window.sb.rpc('stempeln', { p_art: 'stopp' });
+        ok.disabled = false;
+        if (error) { meldung.replaceChildren(fehlerKasten('Stopp hat nicht geklappt', error)); return; }
+        stoppFragen = false;
+        text.value = '';
         holen();
       });
-      return { karte: f, fuellen, text, datum };
+      return { f, text };
     }
 
     async function holen() {
@@ -211,7 +232,6 @@
         ]);
         if (s.error || t.error) throw s.error || t.error;
         taetigkeiten = taetigkeitenNach(t.data || []);
-        tk.fuellen();
         zeichnen(s.data || []);
       } catch (e) {
         oben.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
@@ -219,34 +239,45 @@
     }
 
     async function druecken(art, knopf) {
+      // Stopp: erst fragen, was gemacht wurde (außer es steht schon da)
+      if (art === 'stopp' && !taetigkeiten[uid + '|' + schichtTag]) {
+        stoppFragen = true;
+        await holen();
+        stopp.text.focus();
+        return;
+      }
       knopf.disabled = true;
       const { error } = await window.sb.rpc('stempeln', { p_art: art });
       if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; return; }
-      await holen();
-      // Nach Feierabend an die Tätigkeit erinnern
-      if (art === 'stopp' && !taetigkeiten[uid + '|' + tagVon(new Date())]) {
-        tk.datum.value = tagVon(new Date());
-        oben.append(el('div', 'st-hinweis', 'Feierabend gestempelt. Bitte noch kurz eintragen, was du heute gemacht hast.'));
-        tk.text.focus();
-      }
+      holen();
     }
 
     function zeichnen(stempel) {
       const z = zustand(stempel);
       const tage = auswerten(stempel);
       const heute = tage.find((t) => t.tag === tagVon(new Date()));
+      const starts = stempel.filter((x) => x.art === 'start' && x.status !== 'abgelehnt');
+      schichtTag = z.art !== 'aus' && starts.length ? tagVon(starts[starts.length - 1].zeit) : null;
+      if (z.art === 'aus') stoppFragen = false;
+
       const karte = el('div', 'st-karte st-status ' + z.art);
       karte.append(el('div', 'gross',
         z.art === 'arbeitet' ? 'Arbeitet seit ' + uhr(z.seit) : z.art === 'pause' ? 'Pause seit ' + uhr(z.seit) : 'Nicht eingestempelt'));
       karte.append(el('div', 'klein', 'Heute gearbeitet: ' + stunden(heute ? heute.arbeitMs : 0)));
-      const knoepfe = el('div', 'st-knoepfe');
-      const plan = z.art === 'aus' ? [['start', 'Start']] : z.art === 'arbeitet' ? [['pause', 'Pause'], ['stopp', 'Stopp']] : [['weiter', 'Weiter'], ['stopp', 'Stopp']];
-      plan.forEach(([art, text]) => {
-        const k = el('button', 'st-knopf ' + art, text);
-        k.addEventListener('click', () => druecken(art, k));
-        knoepfe.append(k);
-      });
-      karte.append(knoepfe);
+      if (stoppFragen) {
+        karte.append(stopp.f);
+      } else {
+        const knoepfe = el('div', 'st-knoepfe');
+        const plan = z.art === 'aus' ? [['start', 'Start']] : z.art === 'arbeitet' ? [['pause', 'Pause'], ['stopp', 'Stopp']] : [['weiter', 'Weiter'], ['stopp', 'Stopp']];
+        plan.forEach(([art, text]) => {
+          const k = el('button', 'st-knopf ' + art, text);
+          k.addEventListener('click', () => druecken(art, k));
+          knoepfe.append(k);
+        });
+        karte.append(knoepfe);
+        const schon = schichtTag && taetigkeiten[uid + '|' + schichtTag];
+        if (schon) karte.append(el('div', 'klein', 'Heute gemacht: ' + schon));
+      }
       const teile = [karte];
       if (z.art !== 'aus' && tagVon(z.seit) !== tagVon(new Date())) {
         teile.push(el('div', 'st-hinweis', 'Du bist seit ' + wannText(z.seit) + ' eingestempelt. Stopp vergessen? Dann unten den Stopp nachtragen.'));
