@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="energie-zuhause.css">
   <link rel="stylesheet" href="pv-stockhalle.css">
   <link rel="stylesheet" href="meldungen.css">
+  <link rel="stylesheet" href="stempeln.css">
   <style>
     :root {
       --gruen: #2e5d34;
@@ -109,12 +110,13 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v12</footer>
+  <footer>v13</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script src="pv-stockhalle.js"></script>
   <script src="meldungen.js"></script>
+  <script src="stempeln.js"></script>
   <script>
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
     // "link" = Kachel öffnet eine andere Seite direkt.
@@ -126,8 +128,24 @@
       { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛' },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
       { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause },
-      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle }
+      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle },
+      { id: 'stempeln', name: 'Stempeln', symbol: '⏱️', seite: window.zeigeStempeln }
     ];
+
+    // Rolle des Angemeldeten (supabase/010_stempeln.sql): chef sieht alles,
+    // mitarbeiter sieht nur „Stempeln“. Für den Start ohne Netz im Gerät gemerkt.
+    const PROFIL_SCHLUESSEL = 'betriebsapp-profil';
+    window.Profil = { rolle: 'mitarbeiter' };
+    async function profilLaden(offline) {
+      try { window.Profil = JSON.parse(localStorage.getItem(PROFIL_SCHLUESSEL)) || window.Profil; } catch (e) {}
+      if (offline) return;
+      const { data, error } = await window.sb.rpc('mein_profil');
+      if (!error && data) {
+        window.Profil = data;
+        try { localStorage.setItem(PROFIL_SCHLUESSEL, JSON.stringify(data)); } catch (e) {}
+      }
+    }
+    function istChef() { return window.Profil.rolle === 'chef'; }
 
     const inhalt = document.getElementById('inhalt');
     const titel = document.getElementById('titel');
@@ -137,6 +155,14 @@
     function zeigeStartseite() {
       titel.textContent = 'Betrieb Aumeier';
       zurueck.style.display = 'none';
+      // Mitarbeiter landen direkt beim Stempeln, ohne Kacheln und Meldungen
+      if (!istChef()) {
+        titel.textContent = 'Stempeln';
+        const s = document.createElement('div');
+        inhalt.replaceChildren(s, kontoZeile());
+        window.zeigeStempeln(s);
+        return;
+      }
       const raster = document.createElement('div');
       raster.className = 'kacheln';
       for (const b of BEREICHE) {
@@ -186,7 +212,10 @@
       kw.addEventListener('click', () => { location.hash = 'kennwort'; });
       const ab = document.createElement('button');
       ab.textContent = 'Abmelden';
-      ab.addEventListener('click', () => window.Anmeldung.abmelden());
+      ab.addEventListener('click', () => {
+        try { localStorage.removeItem(PROFIL_SCHLUESSEL); } catch (e) {}
+        window.Anmeldung.abmelden();
+      });
       k.append(wer, kw, ab);
       return k;
     }
@@ -209,16 +238,17 @@
         window.Anmeldung.kennwortAendern(inhalt, () => { location.hash = ''; });
         return;
       }
-      const b = BEREICHE.find((x) => x.id === id && !x.link);
+      const b = istChef() ? BEREICHE.find((x) => x.id === id && !x.link) : null;
       if (b) zeigeBereich(b); else zeigeStartseite();
       window.scrollTo(0, 0);
     }
 
     // Erst nach erfolgreicher Anmeldung (Kennwort + Code) wird die App gezeigt
     let ohneNetz = false;
-    window.Anmeldung.start(inhalt, (zustand) => {
+    window.Anmeldung.start(inhalt, async (zustand) => {
       ohneNetz = zustand.offline;
-      if (!ohneNetz) window.Meldungen.auffrischen();
+      await profilLaden(ohneNetz);
+      if (!ohneNetz && istChef()) window.Meldungen.auffrischen();
       window.addEventListener('hashchange', anzeigen);
       anzeigen();
     });

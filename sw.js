@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v12';
+const VERSION = 'v13';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -15,6 +15,8 @@ const DATEIEN = [
   'pv-stockhalle.js',
   'meldungen.css',
   'meldungen.js',
+  'stempeln.css',
+  'stempeln.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png'

@@ -1,0 +1,97 @@
+/* Bereich „Stempeln“ */
+.st { display: flex; flex-direction: column; gap: 12px; }
+.st:empty { display: none; }
+.st-karte {
+  background: var(--karte);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-karte h3 { margin: 0; font-size: 1rem; }
+.st .klein { font-size: 0.8rem; color: var(--grau); margin: 0; }
+.st-hinweis { padding: 8px 12px; border-radius: 8px; background: #fff4d6; color: #6b4e00; font-size: 0.85rem; }
+.st-hinweis.fehler { background: #fde2e2; color: #8a1c1c; }
+.st-hinweis.ok { background: #e3f4e8; color: #1d5a32; }
+
+.st-status { text-align: center; gap: 6px; }
+.st-status .gross { font-size: 1.4rem; font-weight: 700; }
+.st-status.arbeitet { border-color: #9fd3b3; background: #f3fbf6; }
+.st-status.pause { border-color: #f0d48a; background: #fffaf0; }
+
+.st-knoepfe { display: flex; gap: 10px; margin-top: 6px; }
+.st-knoepfe > * { flex: 1; }
+.st-knopf {
+  font: inherit;
+  font-weight: 700;
+  font-size: 1.2rem;
+  padding: 18px 12px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+}
+.st-knoepfe.klein .st-knopf { font-size: 0.95rem; padding: 10px; }
+.st-knopf.start, .st-knopf.weiter { background: #2e8b4e; }
+.st-knopf.pause { background: #d99a00; }
+.st-knopf.stopp { background: #c0392b; }
+.st-knopf.leise { background: transparent; color: var(--gruen); border: 1px solid var(--rand); font-size: 0.95rem; padding: 10px; }
+.st-knopf:disabled { opacity: 0.6; }
+
+.st-formular label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; font-weight: 600; }
+.st-formular input, .st-formular select {
+  font: inherit;
+  font-weight: 400;
+  padding: 10px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: #fff;
+  min-height: 44px;
+}
+.st-formular button {
+  font: inherit;
+  font-weight: 600;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--gruen);
+  color: #fff;
+  cursor: pointer;
+}
+
+.st-tag {
+  display: grid;
+  grid-template-columns: 5.5em 1fr auto auto;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid #eceee8;
+  font-size: 0.9rem;
+}
+.st-tag .datum { font-weight: 600; }
+.st-tag .pause { font-size: 0.75rem; color: var(--grau); }
+.st-tag .std { font-weight: 700; text-align: right; }
+.st-tag .marke { grid-column: 1 / -1; font-size: 0.75rem; color: #6b4e00; }
+.st-tag.warnung .marke { color: #8a1c1c; font-weight: 600; }
+.st-summe { font-weight: 700; }
+
+.st-nachtrag { border-top: 1px solid #eceee8; padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.st-nachtrag .was { font-weight: 600; }
+
+.st-person { display: grid; grid-template-columns: 12px auto 1fr auto; gap: 8px; align-items: center; font-size: 0.9rem; }
+.st-person .name { font-weight: 600; }
+.st-person .zustand { color: var(--grau); font-size: 0.8rem; }
+.st-person .std { font-weight: 700; }
+.punkt { width: 10px; height: 10px; border-radius: 50%; background: #b9bdb3; }
+.punkt.arbeitet { background: #2fb36b; }
+.punkt.pause { background: #f5b301; }
+
+.st-monatkopf { display: flex; align-items: center; justify-content: space-between; }
+.st-pfeil { font: inherit; font-size: 1.4rem; border: 0; background: none; color: var(--gruen); padding: 0 12px; cursor: pointer; }
+.st-monat summary { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; cursor: pointer; border-top: 1px solid #eceee8; }
+.st-monat summary .name { font-weight: 600; flex: 1; }
+.st-monat summary .std { font-weight: 700; }
+.st-monat summary .marke { font-size: 0.75rem; color: #8a1c1c; }
+.punkt.alt { background: #d64545; }
