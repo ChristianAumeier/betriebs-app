@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v17';
+const VERSION = 'v18';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -62,10 +62,13 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // Zuerst aus dem Netz holen (immer aktuell), ohne Netz aus dem Speicher.
+// Eigene Dateien mit „no-cache“: sonst liefert das Handy bis zu 10 Minuten lang die alte Fassung
+// aus seinem Zwischenspeicher (GitHub Pages erlaubt 10 Minuten), auch wenn schon eine neue online ist.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const eigene = new URL(event.request.url).origin === self.location.origin;
   event.respondWith(
-    fetch(event.request)
+    (eigene ? fetch(event.request.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(event.request))
       .then((antwort) => {
         if (antwort.ok && new URL(event.request.url).origin === self.location.origin) {
           const kopie = antwort.clone();
