@@ -309,7 +309,7 @@
       const teile = [];
 
       if (!personen.length) {
-        teile.push(el('div', 'st-hinweis', 'Noch keine Mitarbeiter mit Stempeln angelegt. Sag Claude, wer dazukommen soll.'));
+        teile.push(el('div', 'st-hinweis', 'Noch keine Mitarbeiter angelegt. Unten über „Konto für Mitarbeiter anlegen“ hinzufügen.'));
       }
 
       // Nachträge zur Freigabe
@@ -428,6 +428,7 @@
       if (error && !fehler) {
         try { fehler = (await error.context.json()).fehler; } catch (e) { fehler = fehlerText(error); }
       }
+      if (fehler && /already been registered/i.test(fehler)) fehler = 'Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte eine andere Adresse nehmen. (' + fehler + ')';
       if (fehler) { meldung.replaceChildren(el('div', 'st-hinweis fehler', fehler)); return; }
       const k = el('div', 'st-hinweis ok');
       k.append(el('div', null, 'Konto angelegt für ' + name.value + ' (' + data.email + ').'),
