@@ -111,7 +111,7 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v24</footer>
+  <footer>v25</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
@@ -125,19 +125,21 @@
     // Die Bereiche der Startseite. Neue Bereiche einfach hier ergänzen.
     // "link" = Kachel öffnet eine andere Seite direkt.
     // "seite" = Funktion, die den Inhalt des Bereichs zeichnet (sonst Platzhalter).
+    // "nurChef" = nur für Christian und Carolin (die Daten sind zusätzlich in der Datenbank gesperrt).
     const BEREICHE = [
-      { id: 'energie-biogas', name: 'Energie Biogasanlage', symbol: '⚡' },
+      { id: 'energie-biogas', name: 'Energie Biogasanlage', symbol: '⚡', nurChef: true },
       { id: 'getreidelager', name: 'Getreidelager', symbol: '🌾' },
       { id: 'wartung-maschinen', name: 'Wartung Maschinen', symbol: '🚜' },
       { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛', seite: window.zeigeBahnschwellen },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
-      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause },
-      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle },
+      { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause, nurChef: true },
+      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle, nurChef: true },
       { id: 'stempeln', name: 'Stempeln', symbol: '⏱️', seite: window.zeigeStempeln }
     ];
 
-    // Rolle des Angemeldeten (supabase/010_stempeln.sql, 013_fuhren.sql): chef sieht alles;
-    // alle anderen sehen „Stempeln“ (wenn sie stempeln) und „Bahnschwellen“ (Fahrer, Transportfirma).
+    // Rolle des Angemeldeten (supabase/010_stempeln.sql, 013_fuhren.sql): chef sieht alles.
+    // Transportfirma sieht nur „Bahnschwellen“. Mitarbeiter sehen alles außer den nurChef-Bereichen,
+    // „Stempeln“ nur wenn sie stempeln, „Bahnschwellen“ nur mit Fahrer-Zugang (Christian, 25.10.2026).
     // Für den Start ohne Netz im Gerät gemerkt.
     const PROFIL_SCHLUESSEL = 'betriebsapp-profil';
     window.Profil = { rolle: 'mitarbeiter' };
@@ -154,10 +156,10 @@
     function eigeneBereiche() {
       if (istChef()) return BEREICHE;
       const p = window.Profil;
-      const ids = [];
-      if (p.stempelt || !p.fuhren) ids.push('stempeln');
-      if (p.fuhren) ids.push('bahnschwellen');
-      return BEREICHE.filter((b) => ids.includes(b.id));
+      if (p.fuhren === 'transportfirma') return BEREICHE.filter((b) => b.id === 'bahnschwellen');
+      return BEREICHE.filter((b) => !b.nurChef &&
+        (b.id !== 'stempeln' || p.stempelt !== false) &&
+        (b.id !== 'bahnschwellen' || p.fuhren === 'fahrer'));
     }
 
     const inhalt = document.getElementById('inhalt');
