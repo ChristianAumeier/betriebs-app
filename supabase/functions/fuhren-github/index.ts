@@ -76,6 +76,8 @@ Deno.serve(async (req: Request) => {
         const info = {
           fuhre_id: id, datum: f.datum, lkw: f.lkw, fahrer_in_der_app: f.fahrer,
           ladestelle_in_der_app: f.ladestellen?.name ?? null, vertrag_in_der_app: f.ladestellen?.vertrag ?? null,
+          // Gesetzt, wenn Christian die Fuhre trotz fehlender Belege abgeschlossen hat (Fehlen ist dann gewollt)
+          ohne_fehlende_belege_abgeschlossen: f.abschluss_grund ?? null,
           dateien, ergebnis_ablegen_unter: "eingang/ergebnisse/fuhre-" + id + ".json",
         };
         const ib = await gh("/git/blobs", { method: "POST", body: JSON.stringify({ content: JSON.stringify(info, null, 2), encoding: "utf-8" }) });

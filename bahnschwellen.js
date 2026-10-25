@@ -195,12 +195,19 @@
     if (f.storniert_am) return 'grau';
     if (f.auffaellig || f.weitergabe_fehler) return 'rot';
     if (f.quelle === 'altbestand') return 'gruen';
-    if (f.hat_lieferschein && f.hat_begleitschein && f.hat_wiegeschein && f.hat_registerbeleg && f.ausgelesen_am) return 'gruen';
+    const rest = f.abgeschlossen_am || (f.hat_begleitschein && f.hat_registerbeleg);
+    if (f.hat_lieferschein && f.hat_wiegeschein && rest && f.ausgelesen_am) return 'gruen';
     return 'gelb';
   }
+  // Was fehlt noch? Bei „trotz fehlender Belege abgeschlossen“ (015) nur noch Lieferschein und Wiegeschein
   function fehlt(f) {
     if (f.quelle === 'altbestand') return [];
     const l = [];
+    if (f.abgeschlossen_am) {
+      if (!f.hat_lieferschein) l.push('Lieferschein');
+      if (!f.hat_wiegeschein) l.push('Wiegeschein');
+      return l;
+    }
     if (!f.hat_lieferschein) l.push('Lieferschein');
     if (!f.hat_begleitschein) l.push('Begleitschein');
     if (!f.abgesendet_am && f.hat_lieferschein && f.hat_begleitschein) l.push('noch nicht an die Transportfirma gesendet');
@@ -238,6 +245,7 @@
       if (f.quelle === 'app') {
         [['L', f.hat_lieferschein, 'Lieferschein'], ['B', f.hat_begleitschein, 'Begleitschein'], ['R', f.hat_registerbeleg, 'Registerbeleg'], ['W', f.hat_wiegeschein, 'Wiegeschein']]
           .forEach(([k, da, t]) => { const s = el('span', 'beleg' + (da ? ' da' : ''), k); s.title = t + (da ? ' da' : ' fehlt'); marken.append(s); });
+        if (f.abgeschlossen_am) marken.append(el('span', 'marke', 'abgeschlossen'));
         if (f.ausgelesen_am) marken.append(el('span', 'marke ok', 'ausgelesen'));
       }
       if (f.auffaellig) marken.append(el('span', 'marke rot', 'prüfen'));
@@ -340,7 +348,7 @@
         const offenQ = r === 'transportfirma'
           ? window.sb.from('fuhren_liste').select('*').not('abgesendet_am', 'is', null).eq('hat_registerbeleg', false).is('storniert_am', null).order('datum')
           : window.sb.from('fuhren_liste').select('*').eq('quelle', 'app').is('storniert_am', null)
-              .or('hat_wiegeschein.eq.false,hat_lieferschein.eq.false,hat_begleitschein.eq.false,abgesendet_am.is.null').order('datum');
+              .or('hat_wiegeschein.eq.false,hat_lieferschein.eq.false,and(abgeschlossen_am.is.null,or(hat_begleitschein.eq.false,abgesendet_am.is.null))').order('datum');
         const [m, o, l, p, w] = await Promise.all([q, offenQ, window.sb.from('ladestellen').select('*').order('name'), preiseLaden(), Schlange.alle()]);
         if (m.error || o.error || l.error) throw m.error || o.error || l.error;
         if (!box.isConnected) return;
@@ -546,8 +554,29 @@
       if (f.hinweise) k.append(el('div', 'bs-hinweis' + (f.auffaellig ? ' fehler' : ''), f.hinweise));
       if (f.weitergabe_fehler) k.append(el('div', 'bs-hinweis fehler', 'Weitergabe an Claude hat nicht geklappt: ' + f.weitergabe_fehler));
       if (f.storniert_am) k.append(el('div', 'bs-hinweis fehler', 'Storniert ' + wann(f.storniert_am) + ': ' + (f.storno_grund || '')));
+      if (f.abgeschlossen_am) k.append(el('div', 'bs-hinweis ok', 'Abgeschlossen ohne fehlende Belege (' + wann(f.abgeschlossen_am) + '): ' + (f.abschluss_grund || '')));
       const fl = fehlt(f);
       if (fl.length && !f.storniert_am) k.append(el('div', 'bs-hinweis', 'Fehlt noch: ' + fl.join(', ')));
+      // Chef: Fuhre trotz fehlender Belege abschließen (z. B. Begleitschein nicht mehr vorhanden)
+      if (r === 'chef' && f.quelle === 'app' && !f.storniert_am && !f.abgeschlossen_am && f.hat_lieferschein && f.hat_wiegeschein &&
+          (!f.hat_begleitschein || !f.hat_registerbeleg)) {
+        const d = el('details', 'bs-formular');
+        d.append(el('summary', null, 'Fehlende Belege gibt es nicht mehr? Fuhre trotzdem abschließen'));
+        const fo = el('form', 'bs-formular');
+        const grund = el('input'); grund.required = true; grund.value = 'Belege nicht mehr vorhanden (vor Einführung der App)';
+        const lg = el('label', null, 'Grund'); lg.append(grund);
+        const kn = el('button', 'bs-knopf', 'Abschließen und auslesen lassen'); kn.type = 'submit';
+        fo.append(el('p', 'klein', 'Die Fuhre zählt dann als komplett und wird aus Lieferschein und Wiegeschein ausgelesen.'), lg, kn);
+        fo.addEventListener('submit', async (ev) => {
+          ev.preventDefault(); kn.disabled = true;
+          const { error } = await window.sb.rpc('fuhre_abschliessen', { p_fuhre: f.id, p_grund: grund.value });
+          kn.disabled = false;
+          if (error) { fo.append(fehlerKasten('Nicht abgeschlossen', error)); return; }
+          holen();
+        });
+        d.append(fo);
+        k.append(d);
+      }
       kopf.replaceChildren(k);
 
       belegeBox.replaceChildren(scanBereich(f, belege, wartend));
@@ -604,7 +633,7 @@
       });
 
       // Absenden an die Transportfirma
-      if ((r === 'chef' || r === 'fahrer') && f.quelle === 'app' && !f.storniert_am && !f.abgesendet_am) {
+      if ((r === 'chef' || r === 'fahrer') && f.quelle === 'app' && !f.storniert_am && !f.abgesendet_am && !f.abgeschlossen_am) {
         const hatL = gueltig.some((b) => b.art === 'lieferschein') || wartend.some((e) => e.art === 'lieferschein');
         const hatB = gueltig.some((b) => b.art === 'begleitschein') || wartend.some((e) => e.art === 'begleitschein');
         const schon = wartend.some((e) => e.typ === 'absenden');
