@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v20';
+const VERSION = 'v21';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -20,6 +20,8 @@ const DATEIEN = [
   'scanner.js',
   'bahnschwellen.css',
   'bahnschwellen.js',
+  'wochen-pdf.js',
+  'lib/pdf-lib-1.17.1.min.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png'

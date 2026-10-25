@@ -320,6 +320,7 @@
     box.append(oben, mitte, monatsKarte, unten);
     let neuKarte = null;
     let chefTeile = null;
+    let wochenKarte = null;
 
     const suchFeld = el('input', 'bs-suche'); suchFeld.type = 'search'; suchFeld.placeholder = 'Suchen: Lieferschein-, Begleitschein- oder Auftragsnummer';
     suchFeld.addEventListener('input', () => { suche = suchFeld.value.trim(); holen(); });
@@ -435,12 +436,15 @@
       }
       monatsKarte.replaceChildren(...teile);
 
+      // Wochen-PDF (wochen-pdf.js) für Chef und Transportfirma; einmal gebaut, damit die Auswahl stehen bleibt
+      if (!wochenKarte && (r === 'chef' || r === 'transportfirma') && window.WochenPdf) wochenKarte = window.WochenPdf.karte();
       if (r === 'chef') {
         if (!chefTeile) chefTeile = chefKarten(() => holen());
         chefTeile.auffrischen(ladestellen, preise);
-        unten.replaceChildren(...chefTeile.karten);
+        unten.replaceChildren(...[wochenKarte].filter(Boolean), ...chefTeile.karten);
       } else if (!unten.childNodes.length && window.Meldungen) {
-        unten.replaceChildren(window.Meldungen.karte(r === 'transportfirma' ? 'Mitteilungen bei neuen Fuhren' : 'Mitteilungen zu den Fuhren'));
+        unten.replaceChildren(...[wochenKarte].filter(Boolean),
+          window.Meldungen.karte(r === 'transportfirma' ? 'Mitteilungen bei neuen Fuhren' : 'Mitteilungen zu den Fuhren'));
       }
     }
 
