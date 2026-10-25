@@ -308,35 +308,19 @@
   }
 
   // ---------- Neue Fuhre ----------
-  function neueFuhreKarte(ladestellen, fertig) {
-    const d = el('details', 'bs-karte bs-neu');
-    const s = el('summary');
-    s.append(el('span', 'bs-knopf gross', '＋ Neue Fuhre'));
-    d.append(s);
-    const f = el('form', 'bs-formular');
-    const tag = el('input'); tag.type = 'date'; tag.value = tagVon(new Date()); tag.required = true;
-    const ort = el('select');
-    const leer = el('option', null, 'weiß ich nicht'); leer.value = ''; ort.append(leer);
-    let zuletzt = '';
-    try { zuletzt = localStorage.getItem('betriebsapp-ladestelle') || ''; } catch (e) {}
-    ladestellen.filter((l) => l.aktiv).forEach((l) => { const o = el('option', null, l.name); o.value = l.id; if (String(l.id) === zuletzt) o.selected = true; ort.append(o); });
-    const l1 = el('label', null, 'Ladetag'); l1.append(tag);
-    const l2 = el('label', null, 'Ladestelle'); l2.append(ort);
-    f.append(el('p', 'klein', 'Danach Lieferschein und Begleitschein scannen.'), l1, l2);
-    const knopf = el('button', 'bs-knopf', 'Fuhre anlegen'); knopf.type = 'submit';
-    f.append(knopf);
-    d.append(f);
-    f.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      knopf.disabled = true;
-      try { localStorage.setItem('betriebsapp-ladestelle', ort.value); } catch (e) {}
+  // Ein Knopf, keine Fragen (Christian, 25.10.2026): Ladetag und Ladestelle liest Claude vom Wiegeschein und
+  // Lieferschein ab. Angelegt wird mit heutigem Datum und ohne Ladestelle; danach geht es direkt zum Scannen.
+  function neueFuhreKnopf(fertig) {
+    const b = el('button', 'bs-knopf gross', '＋ Neue Fuhre');
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      b.disabled = true; // kein zweites Antippen, sonst gäbe es eine leere Fuhre doppelt
       const lokal = 'L' + Date.now();
-      await Schlange.dazu({ typ: 'fuhre', lokal, fuhre: lokal, datum: tag.value, ladestelle: ort.value ? Number(ort.value) : null, angelegt: new Date().toISOString() });
-      knopf.disabled = false;
-      d.open = false;
+      await Schlange.dazu({ typ: 'fuhre', lokal, fuhre: lokal, datum: tagVon(new Date()), ladestelle: null, angelegt: new Date().toISOString() });
+      setTimeout(() => { b.disabled = false; }, 1500);
       fertig(lokal);
     });
-    return d;
+    return b;
   }
 
   // ---------- Liste ----------
@@ -392,7 +376,7 @@
       // oben: Neue Fuhre (Fahrer/Chef), Warteschlange
       const obenTeile = [];
       if (r !== 'transportfirma') {
-        if (!neuKarte) neuKarte = neueFuhreKarte(ladestellen, (lokal) => { location.hash = 'bahnschwellen/' + lokal; });
+        if (!neuKarte) neuKarte = neueFuhreKnopf((lokal) => { location.hash = 'bahnschwellen/' + lokal; });
         obenTeile.push(neuKarte);
       }
       const wk = warteKarte(wartend, holen);
