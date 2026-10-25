@@ -177,11 +177,20 @@
     if (error) throw error;
     return data || [];
   }
+  // Gültiger Preis der Ladestelle am Ladetag: { preis, art } mit art 'schwelle' oder 'fuhre' (supabase/014)
   function preisFuer(preise, f) {
     let p = null;
-    for (const x of preise) if (x.ladestelle_id === f.ladestelle_id && x.gueltig_ab <= f.datum) p = x.preis_schwelle;
-    return p === null ? null : Number(p);
+    for (const x of preise) if (x.ladestelle_id === f.ladestelle_id && x.gueltig_ab <= f.datum) p = x;
+    return p === null ? null : { preis: Number(p.preis_schwelle), art: p.art || 'schwelle' };
   }
+  // Euro für eine Fuhre: pro Fuhre fester Betrag, sonst Stück × Preis (null, wenn Preis oder Stück fehlt)
+  function betragFuer(preise, f) {
+    const p = preisFuer(preise, f);
+    if (!p) return null;
+    if (p.art === 'fuhre') return p.preis;
+    return f.stueck === null || f.stueck === undefined ? null : p.preis * f.stueck;
+  }
+  function preisText(p) { return euro(p.preis) + (p.art === 'fuhre' ? ' je Fuhre' : ' je Schwelle'); }
   function ampel(f) {
     if (f.storniert_am) return 'grau';
     if (f.auffaellig || f.weitergabe_fehler) return 'rot';
@@ -221,7 +230,7 @@
     if (f.stueck !== null) teile.push(zahl(f.stueck) + ' Stück');
     if (f.gewicht_t !== null) teile.push(zahl(f.gewicht_t, 2) + ' t');
     if (f.abladezeit) teile.push('Abladen ' + zeit(f.abladezeit));
-    if (preise && f.stueck !== null) { const p = preisFuer(preise, f); if (p !== null) teile.push(euro(p * f.stueck)); }
+    if (preise) { const b = betragFuer(preise, f); if (b !== null) teile.push(euro(b)); }
     unten.append(el('span', null, teile.join(' · ') || (f.ausgelesen_am || f.quelle === 'altbestand' ? '' : 'noch nicht ausgelesen')));
     const marken = el('div', 'marken');
     if (f.storniert_am) marken.append(el('span', 'marke', 'storniert'));
@@ -406,7 +415,7 @@
       let ohnePreis = 0;
       if (r === 'chef') {
         let betrag = 0;
-        gueltig.forEach((f) => { const p = preisFuer(preise, f); if (p === null) { if (f.stueck) ohnePreis++; } else betrag += p * (f.stueck || 0); });
+        gueltig.forEach((f) => { if (!preisFuer(preise, f)) { ohnePreis++; return; } betrag += betragFuer(preise, f) || 0; });
         summe.append(kachel(euro(betrag), 'Betrag'));
       }
       const liste = el('div', 'bs-liste');
@@ -518,9 +527,10 @@
       zeile('Auftrags-Nr. (Wiegeschein)', f.auftrag_nr);
       if (f.lieferschein_nr) zeile('Lieferschein-Nr.', f.lieferschein_nr);
       zeile('Vertrag', f.vertrag);
-      if (r === 'chef' && f.stueck !== null) {
+      if (r === 'chef') {
         const p = preisFuer(preise, f);
-        zeile('Betrag', p === null ? 'Preis fehlt' : euro(p * f.stueck) + ' (' + euro(p) + ' je Schwelle)');
+        const b = betragFuer(preise, f);
+        zeile('Betrag', !p ? 'Preis fehlt' : (b === null ? '–' : euro(b)) + ' (' + preisText(p) + ')');
       }
       k.append(werte);
       const stand = [];
@@ -745,15 +755,19 @@
         const eigene = preise.filter((p) => p.ladestelle_id === l.id);
         const z = el('div', 'bs-ladestelle');
         z.append(el('div', 'name', l.name + ' · Vertrag ' + l.vertrag));
-        z.append(el('div', 'klein', eigene.length ? eigene.map((p) => 'ab ' + datum(p.gueltig_ab) + ': ' + euro(p.preis_schwelle)).join(' · ') : 'Noch kein Preis'));
+        z.append(el('div', 'klein', eigene.length ? eigene.map((p) => 'ab ' + datum(p.gueltig_ab) + ': ' + preisText({ preis: Number(p.preis_schwelle), art: p.art })).join(' · ') : 'Noch kein Preis'));
         const f = el('form', 'bs-zeilenform');
         const ab = el('input'); ab.type = 'date'; ab.required = true; ab.value = tagVon(new Date()).slice(0, 8) + '01';
-        const pr = el('input'); pr.type = 'number'; pr.step = '0.01'; pr.min = '0'; pr.required = true; pr.placeholder = '€ je Schwelle';
+        const pr = el('input'); pr.type = 'number'; pr.step = '0.01'; pr.min = '0'; pr.required = true; pr.placeholder = '€';
+        // Abrechnung hängt an der Ladestelle: pro Schwelle oder fester Betrag pro Fuhre
+        const art = el('select');
+        [['schwelle', 'je Schwelle'], ['fuhre', 'je Fuhre']].forEach(([w, t]) => { const o = el('option', null, t); o.value = w; art.append(o); });
+        art.value = eigene.length ? (eigene[eigene.length - 1].art || 'schwelle') : 'schwelle';
         const b = el('button', 'bs-knopf mini', 'Preis setzen'); b.type = 'submit';
-        f.append(ab, pr, b);
+        f.append(ab, pr, art, b);
         f.addEventListener('submit', async (ev) => {
           ev.preventDefault(); b.disabled = true;
-          const { error } = await window.sb.rpc('preis_setzen', { p_ladestelle: l.id, p_gueltig_ab: ab.value, p_preis: Number(pr.value) });
+          const { error } = await window.sb.rpc('preis_setzen', { p_ladestelle: l.id, p_gueltig_ab: ab.value, p_preis: Number(pr.value), p_art: art.value });
           b.disabled = false;
           if (error) { f.append(fehlerKasten('Nicht gespeichert', error)); return; }
           fertig();
@@ -877,11 +891,12 @@
 
   // ---------- Herunterladen ----------
   function csvHerunterladen(fuhren, preise, dateiname) {
-    const kopf = ['Datum', 'Ladestelle', 'Vertrag', 'Stück', 'Gewicht (t)', 'Zeit beim Abladen', 'Fahrer', 'Begleitscheinnummer', 'Auftragsnummer', '€ je Schwelle', 'Betrag (€)', 'Hinweis'];
+    const kopf = ['Datum', 'Ladestelle', 'Vertrag', 'Stück', 'Gewicht (t)', 'Zeit beim Abladen', 'Fahrer', 'Begleitscheinnummer', 'Auftragsnummer', 'Vergütung', 'Betrag (€)', 'Hinweis'];
     const zeilen = fuhren.filter((f) => !f.storniert_am).slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.id - b.id)).map((f) => {
       const p = preisFuer(preise, f);
+      const b = betragFuer(preise, f);
       return [datum(f.datum), f.ladestelle || '', f.vertrag || '', f.stueck ?? '', f.gewicht_t === null ? '' : zahl(f.gewicht_t, 2), zeit(f.abladezeit).replace('–', ''),
-        f.fahrer || '', f.begleitschein_nr || '', f.auftrag_nr || '', p === null ? '' : zahl(p, 2), p === null || f.stueck === null ? '' : zahl(p * f.stueck, 2), f.hinweise || ''];
+        f.fahrer || '', f.begleitschein_nr || '', f.auftrag_nr || '', p ? preisText(p) : '', b === null ? '' : zahl(b, 2), f.hinweise || ''];
     });
     const text = [kopf].concat(zeilen).map((z) => z.map((x) => '"' + String(x).replace(/"/g, '""') + '"').join(';')).join('\r\n');
     speichernAls(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }), dateiname);
