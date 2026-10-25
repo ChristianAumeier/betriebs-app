@@ -184,3 +184,19 @@ body.sc-offen { overflow: hidden; }
 .sc-knopf { flex: 1; font: inherit; font-weight: 700; padding: 14px 8px; border-radius: 12px; border: 0; background: #2e8b4e; color: #fff; }
 .sc-knopf.leise { background: #222; border: 1px solid #444; font-weight: 600; }
 .sc-knopf:disabled { opacity: 0.6; }
+/* Live-Scanner */
+.sc-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.sc-linien polygon.stabil { fill: rgba(47, 179, 107, 0.35); stroke-width: 4; }
+.sc-knoepfe { align-items: center; }
+.sc-ausloeser {
+  flex: none;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 5px solid #fff;
+  background: #2e8b4e;
+  box-shadow: 0 0 0 3px #2e8b4e;
+  margin: 0 8px;
+}
+.sc-ausloeser:active { transform: scale(0.94); }
+.sc-ergebnis { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #333; }

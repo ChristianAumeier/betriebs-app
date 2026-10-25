@@ -1,5 +1,7 @@
-// Scannen mit der Handy-Kamera wie ein Dokumentenscanner:
-// Foto aufnehmen → Blatt wird erkannt (vier Ecken, von Hand verschiebbar) → gerade gezogen und aufgehellt → JPEG.
+// Scannen mit der Handy-Kamera wie ein Dokumentenscanner (ähnlich DATEV Upload):
+// Kamera läuft in der App → Blatt wird live erkannt und grün umrandet → bei ruhiger Hand automatische Aufnahme
+// → gerade gezogen, Rand weg, aufgehellt → JPEG. Ecken lassen sich danach noch von Hand verschieben.
+// Ohne Kamera-Zugriff: normale Handy-Kamera bzw. Foto auswählen, dann Ecken einstellen.
 // Alles läuft im Gerät, ohne fremde Bibliotheken. window.Scanner.scannen() liefert { blob, mime } oder null.
 
 (function () {
@@ -42,9 +44,15 @@
 
   // ---------- Blatt erkennen ----------
   // Verkleinert, Helligkeitsschwelle (Otsu), größte helle Fläche, deren äußerste Punkte = Ecken.
-  function eckenFinden(quelle) {
-    const b = 240, h = Math.round(quelle.height * b / quelle.width);
-    const c = leinwand(b, h);
+  // Liefert die Ecken (in Pixeln der Quelle) oder null, wenn kein Blatt sicher erkannt ist.
+  // quelle darf ein Bild, eine Leinwand oder das laufende Kamerabild (video) sein.
+  let suchLeinwand = null;
+  function blattSuchen(quelle, qb, qh, breite) {
+    qb = qb || quelle.width; qh = qh || quelle.height;
+    const b = breite || 240, h = Math.round(qh * b / qb);
+    if (!suchLeinwand) suchLeinwand = leinwand(b, h);
+    const c = suchLeinwand;
+    if (c.width !== b || c.height !== h) { c.width = b; c.height = h; }
     const cx = c.getContext('2d', { willReadFrequently: true });
     cx.drawImage(quelle, 0, 0, b, h);
     const d = cx.getImageData(0, 0, b, h).data;
@@ -80,20 +88,32 @@
       }
       if (n > groesse) { groesse = n; groesste = punkte; }
     }
-    const f = quelle.width / b;
-    if (!groesste || groesse < b * h * 0.15) {
-      const r = 0.05;
-      return [[r, r], [1 - r, r], [1 - r, 1 - r], [r, 1 - r]].map(([x, y]) => [x * quelle.width, y * quelle.height]);
-    }
+    const f = qb / b;
+    if (!groesste || groesse < b * h * 0.12) return null;
     let lo = null, ro = null, ru = null, lu = null;
+    let minX = b, maxX = 0, minY = h, maxY = 0;
     for (const p of groesste) {
       const x = p % b, y = (p / b) | 0;
+      if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (!lo || x + y < lo[0] + lo[1]) lo = [x, y];
       if (!ru || x + y > ru[0] + ru[1]) ru = [x, y];
       if (!ro || x - y > ro[0] - ro[1]) ro = [x, y];
       if (!lu || y - x > lu[1] - lu[0]) lu = [x, y];
     }
-    return [lo, ro, ru, lu].map(([x, y]) => [(x + 0.5) * f, (y + 0.5) * f]);
+    // Plausibel? Nicht das ganze Bild (z. B. heller Himmel) und die Fläche füllt das Viereck fast ganz aus (= rechteckig)
+    if (maxX - minX > b * 0.985 && maxY - minY > h * 0.985) return null;
+    const q = [lo, ro, ru, lu];
+    let flaeche = 0;
+    for (let i = 0; i < 4; i++) { const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % 4]; flaeche += x1 * y2 - x2 * y1; }
+    flaeche = Math.abs(flaeche) / 2;
+    if (flaeche < b * h * 0.12 || groesse / flaeche < 0.8) return null;
+    return q.map(([x, y]) => [(x + 0.5) * f, (y + 0.5) * f]);
+  }
+  function eckenFinden(quelle) {
+    const e = blattSuchen(quelle);
+    if (e) return e;
+    const r = 0.05;
+    return [[r, r], [1 - r, r], [1 - r, 1 - r], [r, 1 - r]].map(([x, y]) => [x * quelle.width, y * quelle.height]);
   }
 
   // ---------- Gerade ziehen ----------
@@ -197,7 +217,7 @@
   }
 
   // ---------- Bearbeiten-Ansicht ----------
-  function bearbeiten(quelle) {
+  function bearbeiten(quelle, eckenStart) {
     return new Promise((fertig) => {
       const huelle = el('div', 'sc-huelle');
       const kopf = el('div', 'sc-kopf', 'Ecken auf die Blattecken ziehen');
@@ -217,7 +237,7 @@
       document.body.append(huelle);
       document.body.classList.add('sc-offen');
 
-      let ecken = eckenFinden(quelle);
+      let ecken = eckenStart ? eckenStart.map((p) => p.slice()) : eckenFinden(quelle);
       let massstab = 1;
       const griffe = ecken.map(() => { const g = el('div', 'sc-griff'); buehne.append(g); return g; });
 
@@ -270,10 +290,171 @@
     });
   }
 
-  // Foto aufnehmen oder auswählen, dann bearbeiten
-  async function scannen(datei) {
-    const f = datei || await dateiWaehlen('image/*');
-    if (!f) return null;
+  // ---------- Live-Scanner (wie DATEV Upload) ----------
+  // Kamera läuft in der App, das Blatt wird laufend erkannt und grün umrandet. Liegt der Rahmen
+  // etwa eine Sekunde ruhig, löst die App selbst aus (oder Knopf drücken). Danach Vorschau des
+  // zugeschnittenen Scans: Übernehmen, Ecken anpassen oder neu aufnehmen.
+  const RUHIG_BILDER = 7;      // so viele Erkennungen hintereinander fast ohne Bewegung → auslösen
+  const RUHIG_ABWEICHUNG = 0.02;
+
+  function live() {
+    return new Promise((fertig) => {
+      const huelle = el('div', 'sc-huelle');
+      const kopf = el('div', 'sc-kopf', 'Kamera wird gestartet …');
+      const buehne = el('div', 'sc-buehne');
+      const video = el('video', 'sc-video');
+      video.setAttribute('playsinline', ''); video.setAttribute('muted', ''); video.muted = true; video.autoplay = true;
+      const linien = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      linien.setAttribute('class', 'sc-linien');
+      const viereck = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      linien.append(viereck);
+      buehne.append(video, linien);
+      const knoepfe = el('div', 'sc-knoepfe');
+      const abbrechen = el('button', 'sc-knopf leise', 'Abbrechen');
+      const ausloeser = el('button', 'sc-ausloeser'); ausloeser.setAttribute('aria-label', 'Aufnehmen');
+      const auto = el('button', 'sc-knopf leise', 'Auto: an');
+      knoepfe.append(abbrechen, ausloeser, auto);
+      huelle.append(kopf, buehne, knoepfe);
+      document.body.append(huelle);
+      document.body.classList.add('sc-offen');
+
+      let strom = null, laeuft = true, automatisch = true, takt = null;
+      let ecken = null, zuletzt = null, verlauf = [];
+      let vw = 0, vh = 0;
+
+      function aufraeumen() {
+        laeuft = false;
+        clearTimeout(takt);
+        if (strom) strom.getTracks().forEach((t) => t.stop());
+        document.body.classList.remove('sc-offen');
+        huelle.remove();
+      }
+      function schliessen(e) { aufraeumen(); fertig(e); }
+      abbrechen.addEventListener('click', () => schliessen(null));
+      auto.addEventListener('click', () => { automatisch = !automatisch; auto.textContent = 'Auto: ' + (automatisch ? 'an' : 'aus'); verlauf = []; });
+
+      // Ohne Kamera-Zugriff: normale Kamera/Fotos des Handys, danach Ecken einstellen
+      function ohneLive(grund) {
+        laeuft = false;
+        kopf.textContent = grund;
+        const k = el('button', 'sc-knopf', 'Kamera des Handys öffnen');
+        k.addEventListener('click', async () => {
+          const f = await dateiWaehlen('image/*');
+          if (!f) return;
+          aufraeumen();
+          fertig(await ausDatei(f));
+        });
+        knoepfe.replaceChildren(abbrechen, k);
+      }
+
+      // Anzeige: Kamerabild „contain“ in der Bühne → Umrechnung Kamera-Pixel → Bildschirm
+      function massstab() {
+        const bb = buehne.clientWidth, bh = buehne.clientHeight;
+        const m = Math.min(bb / vw, bh / vh);
+        return { m, x: (bb - vw * m) / 2, y: (bh - vh * m) / 2, bb, bh };
+      }
+      function rahmen(stabil) {
+        const s = massstab();
+        linien.setAttribute('width', s.bb); linien.setAttribute('height', s.bh);
+        if (!ecken) { viereck.setAttribute('points', ''); return; }
+        viereck.setAttribute('points', ecken.map(([x, y]) => (s.x + x * s.m) + ',' + (s.y + y * s.m)).join(' '));
+        viereck.setAttribute('class', stabil ? 'stabil' : '');
+      }
+
+      function erkennen() {
+        if (!laeuft) return;
+        if (video.readyState >= 2 && video.videoWidth) {
+          vw = video.videoWidth; vh = video.videoHeight;
+          const neu = blattSuchen(video, vw, vh, 200);
+          if (neu) {
+            // Ruhe prüfen: größte Eckbewegung im Verhältnis zur Bildbreite
+            const bewegung = ecken ? Math.max(...neu.map((p, i) => Math.hypot(p[0] - ecken[i][0], p[1] - ecken[i][1]))) / vw : 1;
+            ecken = ecken ? neu.map((p, i) => [(p[0] + ecken[i][0]) / 2, (p[1] + ecken[i][1]) / 2]) : neu;
+            zuletzt = neu; // für die Aufnahme die neueste Erkennung (der Rahmen auf dem Bildschirm ist geglättet)
+            verlauf.push(bewegung < RUHIG_ABWEICHUNG);
+            if (verlauf.length > RUHIG_BILDER) verlauf.shift();
+            const ruhig = verlauf.length === RUHIG_BILDER && verlauf.every(Boolean);
+            kopf.textContent = automatisch ? (ruhig ? 'Aufnahme …' : 'Blatt erkannt – bitte ruhig halten') : 'Blatt erkannt – zum Aufnehmen tippen';
+            rahmen(ruhig);
+            if (ruhig && automatisch) { aufnehmen(); return; }
+          } else {
+            ecken = null; zuletzt = null; verlauf = [];
+            kopf.textContent = 'Dokument ins Bild halten (dunkler Untergrund hilft)';
+            rahmen(false);
+          }
+        }
+        takt = setTimeout(erkennen, 120);
+      }
+
+      async function aufnehmen() {
+        if (!vw) return;
+        laeuft = false;
+        clearTimeout(takt);
+        const bild = leinwand(vw, vh);
+        bild.getContext('2d').drawImage(video, 0, 0, vw, vh);
+        // Beim Auslösen frisch suchen (genau dieses Bild); sonst letzte Erkennung; sonst ganzes Bild
+        const e = blattSuchen(bild, vw, vh, 320) || (zuletzt || ecken || [[0, 0], [vw, 0], [vw, vh], [0, vh]]).map((p) => p.slice());
+        if (navigator.vibrate) navigator.vibrate(40);
+        vorschau(bild, e);
+      }
+      ausloeser.addEventListener('click', aufnehmen);
+
+      // Vorschau des zugeschnittenen Scans
+      function vorschau(bild, e) {
+        kopf.textContent = 'Wird zugeschnitten …';
+        setTimeout(() => {
+          const c = geradeZiehen(bild, e, true);
+          c.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const img = el('img', 'sc-ergebnis'); img.src = url;
+            buehne.replaceChildren(img);
+            kopf.textContent = 'So sieht der Scan aus';
+            const nochmal = el('button', 'sc-knopf leise', 'Neu');
+            const anpassen = el('button', 'sc-knopf leise', 'Ecken anpassen');
+            const ok = el('button', 'sc-knopf', 'Übernehmen');
+            knoepfe.replaceChildren(nochmal, anpassen, ok);
+            ok.addEventListener('click', () => { URL.revokeObjectURL(url); schliessen({ blob, mime: 'image/jpeg', breite: c.width, hoehe: c.height }); });
+            nochmal.addEventListener('click', () => {
+              URL.revokeObjectURL(url);
+              buehne.replaceChildren(video, linien);
+              knoepfe.replaceChildren(abbrechen, ausloeser, auto);
+              ecken = null; zuletzt = null; verlauf = []; laeuft = true;
+              video.play().catch(() => {});
+              erkennen();
+            });
+            anpassen.addEventListener('click', async () => {
+              URL.revokeObjectURL(url);
+              huelle.style.display = 'none';
+              const r = await bearbeiten(bild, e);
+              if (r) { schliessen(r); return; }
+              huelle.style.display = '';
+              document.body.classList.add('sc-offen');
+              vorschau(bild, e);
+            });
+          }, 'image/jpeg', QUALITAET);
+        }, 30);
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        ohneLive('Dieses Gerät erlaubt keine Kamera in der App.');
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1920 } }
+      }).then((s) => {
+        strom = s;
+        if (!huelle.isConnected) { aufraeumen(); return; }
+        video.srcObject = s;
+        return video.play().then(() => { kopf.textContent = 'Dokument ins Bild halten'; erkennen(); });
+      }).catch((e) => {
+        ohneLive('Kamera nicht verfügbar (' + (e && e.name === 'NotAllowedError' ? 'nicht erlaubt – in den Einstellungen des Handys bei der App „Kamera“ erlauben' : fehlerName(e)) + ').');
+      });
+    });
+  }
+  function fehlerName(e) { return (e && (e.message || e.name)) || String(e); }
+
+  async function ausDatei(f) {
     const img = await bildLaden(f);
     const m = Math.min(1, RECHEN_MAX / Math.max(img.naturalWidth, img.naturalHeight));
     const c = leinwand(Math.round(img.naturalWidth * m), Math.round(img.naturalHeight * m));
@@ -281,5 +462,11 @@
     return bearbeiten(c);
   }
 
-  window.Scanner = { scannen, dateiWaehlen };
+  // Scannen: mit Datei (z. B. aus Fotos) → Ecken einstellen; sonst Live-Scanner mit Kamera
+  async function scannen(datei) {
+    if (datei) return ausDatei(datei);
+    return live();
+  }
+
+  window.Scanner = { scannen, dateiWaehlen, blattSuchen };
 })();
