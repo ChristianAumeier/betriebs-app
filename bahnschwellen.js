@@ -69,60 +69,87 @@
     async function tun(store, modus, arbeit) {
       const d = await db();
       return new Promise((ok, fehler) => {
-        const t = d.transaction(store, modus);
+        let t;
+        // iPhone: Nach langer Zeit im Hintergrund kann die Verbindung zur Gerätedatenbank weg sein → neu öffnen
+        try { t = d.transaction(store, modus); } catch (e) { dbVersprechen = null; fehler(e); return; }
         const s = t.objectStore(store);
         let ergebnis;
         const r = arbeit(s);
         if (r) r.onsuccess = () => { ergebnis = r.result; };
         t.oncomplete = () => ok(ergebnis);
         t.onerror = () => fehler(t.error);
+        t.onabort = () => { dbVersprechen = null; fehler(t.error || new Error('Gerätespeicher: Vorgang abgebrochen')); };
       });
+    }
+    // Nichts darf ewig hängen: nach der Frist gilt der Versuch als gescheitert und wird später wiederholt
+    function mitFrist(versprechen, ms, was) {
+      let uhr;
+      return Promise.race([versprechen, new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error(was + ': keine Antwort nach ' + Math.round(ms / 1000) + ' Sekunden')), ms); })])
+        .finally(() => clearTimeout(uhr));
+    }
+    // Scan aus dem Gerätespeicher holen. Neu: als Bytes (ArrayBuffer) gespeichert, früher als Blob –
+    // ein Blob kann am iPhone nach einem Neustart der App unlesbar werden.
+    async function scanInhalt(e) {
+      if (e.daten) return new Blob([e.daten], { type: e.mime });
+      try { return new Blob([await e.blob.arrayBuffer()], { type: e.mime }); } catch (f) {
+        throw new Error('Dieser Scan ist auf dem Handy nicht mehr lesbar. Bitte „Verwerfen“ tippen und die Seite neu scannen.');
+      }
     }
     const zuhoerer = new Set();
     function melden() { zuhoerer.forEach((f) => { try { f(); } catch (e) {} }); }
-    let laeuft = false, nochmal = false;
+    let laeuft = false, laeuftSeit = 0, nochmal = false;
 
     async function abarbeiten() {
       if (!window.sb) return;
-      if (laeuft) { nochmal = true; return; } // während des Sendens Dazugekommenes gleich danach
+      // Während des Sendens Dazugekommenes gleich danach; hängt ein Durchgang länger als 3 Minuten, neu anfangen
+      if (laeuft && Date.now() - laeuftSeit < 180000) { nochmal = true; return; }
       laeuft = true;
+      laeuftSeit = Date.now();
       nochmal = false;
-      let abgebrochen = false;
+      let fehlerDa = false;
+      // Scheitert ein Eintrag, warten nur die späteren Einträge DERSELBEN Fuhre (Reihenfolge je Fuhre);
+      // alle anderen Fuhren gehen trotzdem raus.
+      const gesperrt = new Set();
       try {
         const eintraege = await tun('schlange', 'readonly', (s) => s.getAll());
         for (const e of eintraege) {
           let fuhre = e.fuhre;
+          if (gesperrt.has(String(fuhre))) continue;
           if (typeof fuhre === 'string') {
             const z = await tun('zuordnung', 'readonly', (s) => s.get(fuhre));
             if (z) fuhre = z.id; else if (e.typ !== 'fuhre') continue;
           }
+          if (gesperrt.has(String(fuhre))) continue;
           try {
             if (e.typ === 'fuhre') {
-              const { data, error } = await window.sb.rpc('fuhre_anlegen', { p_datum: e.datum, p_ladestelle: e.ladestelle || null });
+              const { data, error } = await mitFrist(window.sb.rpc('fuhre_anlegen', { p_datum: e.datum, p_ladestelle: e.ladestelle || null }), 60000, 'Fuhre anlegen');
               if (error) throw error;
               await tun('zuordnung', 'readwrite', (s) => s.put({ lokal: e.lokal, id: data }));
             } else if (e.typ === 'beleg') {
+              const inhalt = await scanInhalt(e);
               const pfad = 'fuhren/' + fuhre + '/' + e.art + '-' + e.zufall + '.' + (e.mime === 'application/pdf' ? 'pdf' : e.mime === 'image/png' ? 'png' : 'jpg');
-              const hoch = await window.sb.storage.from('belege').upload(pfad, e.blob, { contentType: e.mime, upsert: false });
+              const hoch = await mitFrist(window.sb.storage.from('belege').upload(pfad, inhalt, { contentType: e.mime, upsert: false }), 180000, 'Scan hochladen');
               if (hoch.error && !/exists|Duplicate/i.test(hoch.error.message || '')) throw hoch.error;
-              const { error } = await window.sb.rpc('beleg_eintragen', { p_fuhre: fuhre, p_art: e.art, p_pfad: pfad, p_mime: e.mime, p_groesse: e.blob.size });
+              const { error } = await mitFrist(window.sb.rpc('beleg_eintragen', { p_fuhre: fuhre, p_art: e.art, p_pfad: pfad, p_mime: e.mime, p_groesse: inhalt.size }), 60000, 'Scan eintragen');
               if (error) throw error;
             } else if (e.typ === 'absenden') {
-              const { error } = await window.sb.rpc('fuhre_absenden', { p_fuhre: fuhre });
+              const { error } = await mitFrist(window.sb.rpc('fuhre_absenden', { p_fuhre: fuhre }), 60000, 'Senden');
               if (error) throw error;
             }
             await tun('schlange', 'readwrite', (s) => s.delete(e.nr));
           } catch (f) {
-            await tun('schlange', 'readwrite', (s) => s.put(Object.assign({}, e, { fehler: fehlerText(f), versuch: new Date().toISOString() })));
-            abgebrochen = true;
-            break; // Reihenfolge einhalten; später neu versuchen
+            fehlerDa = true;
+            gesperrt.add(String(e.fuhre)); gesperrt.add(String(fuhre));
+            try { await tun('schlange', 'readwrite', (s) => s.put(Object.assign({}, e, { fehler: fehlerText(f), versuch: new Date().toISOString() }))); } catch (g) { /* nächster Durchgang */ }
           }
           melden();
         }
+      } catch (f) {
+        fehlerDa = true;
       } finally {
         laeuft = false;
         melden();
-        if (nochmal && !abgebrochen) setTimeout(abarbeiten, 0);
+        if (nochmal && !fehlerDa) setTimeout(abarbeiten, 0);
       }
     }
     async function dazu(eintrag) {
@@ -149,7 +176,9 @@
     } catch (e) { alert('Scannen hat nicht geklappt: ' + fehlerText(e)); return false; }
     if (!ergebnis) return false;
     if (knopf) knopf.disabled = true;
-    await Schlange.dazu({ typ: 'beleg', fuhre, art, zufall: zufall(), blob: ergebnis.blob, mime: ergebnis.mime, angelegt: new Date().toISOString() });
+    // Als Bytes speichern (am iPhone zuverlässiger als ein Blob im Gerätespeicher)
+    const daten = await ergebnis.blob.arrayBuffer();
+    await Schlange.dazu({ typ: 'beleg', fuhre, art, zufall: zufall(), daten, mime: ergebnis.mime, angelegt: new Date().toISOString() });
     return true;
   }
 
