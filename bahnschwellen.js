@@ -1,6 +1,6 @@
 // Bereich „Bahnschwellen“: Fuhren unseres LKW mit ihren Belegen (supabase/013_fuhren.sql).
-//   Fahrer:          „Neue Fuhre“ → Lieferschein + Begleitschein scannen → „An die Transportfirma senden“; in Nürnberg Wiegeschein.
-//   Transportfirma:  Liste „Zu signieren“; signiert selbst in ZEDAL, legt dann den Registerbeleg zur Fuhre.
+//   Fahrer:          „Neue Fuhre“ → Lieferschein (und Begleitschein, falls da) scannen → „An die Transportfirma senden“; in Nürnberg Wiegeschein.
+//   Transportfirma:  Liste „Zu signieren“; signiert selbst in ZEDAL, legt dann Registerbeleg (und Begleitschein, falls er fehlt) zur Fuhre.
 //   Chef:            alles, dazu Euro, Ladestellen und Preise, Zugänge, Weitergabe an Claude, Listen.
 // Scans und neue Fuhren warten ohne Netz auf dem Handy (IndexedDB) und gehen raus, sobald Netz da ist.
 // Ist eine Fuhre komplett, liest Claude sie automatisch aus (Routine über das Repository claude-gedaechtnis).
@@ -239,7 +239,7 @@
     }
     if (!f.hat_lieferschein) l.push('Lieferschein');
     if (!f.hat_begleitschein) l.push('Begleitschein');
-    if (!f.abgesendet_am && f.hat_lieferschein && f.hat_begleitschein) l.push('noch nicht an die Transportfirma gesendet');
+    if (!f.abgesendet_am && f.hat_lieferschein) l.push('noch nicht an die Transportfirma gesendet');
     if (!f.hat_registerbeleg) l.push('Registerbeleg');
     if (!f.hat_wiegeschein) l.push('Wiegeschein');
     return l;
@@ -634,8 +634,9 @@
         const knoepfe = el('div', 'bs-knoepfe');
         const fuhreKennung = f.id;
         if (!f.storniert_am && f.quelle === 'app') {
-          if (art === 'registerbeleg' && (r === 'transportfirma' || r === 'chef')) {
-            knoepfe.append(scanKnopf(eigene.length ? 'Weitere Seite scannen' : 'Registerbeleg scannen', fuhreKennung, art, fertig, eigene.length ? 'leise' : ''),
+          // Registerbeleg: Transportfirma und Chef; Begleitschein darf die Transportfirma auch dranhängen (018)
+          if ((art === 'registerbeleg' && (r === 'transportfirma' || r === 'chef')) || (art === 'begleitschein' && r === 'transportfirma')) {
+            knoepfe.append(scanKnopf(eigene.length ? 'Weitere Seite scannen' : ARTEN[art] + ' scannen', fuhreKennung, art, fertig, eigene.length ? 'leise' : ''),
               dateiKnopf('Als Datei hochladen (PDF/Bild)', fuhreKennung, art, fertig));
           } else if (darfScannen && art !== 'registerbeleg') {
             knoepfe.append(scanKnopf(eigene.length || warten.length ? 'Weitere Seite scannen' : ARTEN[art] + ' scannen', fuhreKennung, art, fertig, eigene.length || warten.length ? 'leise' : ''));
@@ -652,13 +653,15 @@
         const schon = wartend.some((e) => e.typ === 'absenden');
         const k = el('div', 'bs-karte');
         const b = el('button', 'bs-knopf gross senden', schon ? 'Wird gesendet …' : 'An die Transportfirma senden');
-        b.disabled = schon || !(hatL && hatB);
+        b.disabled = schon || !hatL;
         b.addEventListener('click', async () => {
           b.disabled = true;
           await Schlange.dazu({ typ: 'absenden', fuhre: f.id, angelegt: new Date().toISOString() });
           holen();
         });
-        k.append(b, el('p', 'klein', hatL && hatB ? 'Die Transportfirma bekommt sofort eine Mitteilung und kann signieren.' : 'Erst Lieferschein und Begleitschein scannen, dann senden.'));
+        k.append(b, el('p', 'klein', !hatL ? 'Erst den Lieferschein scannen, dann senden.'
+          : hatB ? 'Die Transportfirma bekommt sofort eine Mitteilung und kann signieren.'
+          : 'Die Transportfirma bekommt sofort eine Mitteilung. Den Begleitschein kann sie selbst dranhängen.'));
         teile.append(k);
       }
 
