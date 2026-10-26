@@ -308,7 +308,8 @@
       k.append(el('h3', null, 'Meine Zeiten im ' + new Date().toLocaleDateString('de-DE', { month: 'long' })));
       k.append(el('div', 'st-summe', 'Zusammen: ' + stunden(imMonat.reduce((s, t) => s + t.arbeitMs, 0))));
       imMonat.slice().reverse().forEach((t) => k.append(tagesZeile(t, taetigkeiten[uid + '|' + t.tag])));
-      const abgelehnt = stempel.filter((s) => s.status === 'abgelehnt');
+      // nur abgelehnte Nachträge; vom Chef gestrichene Fehl-Tipper sind keine Nachricht wert
+      const abgelehnt = stempel.filter((s) => s.status === 'abgelehnt' && s.nachtrag);
       abgelehnt.forEach((s) => k.append(el('div', 'st-hinweis', 'Nachtrag abgelehnt: ' + ARTEN[s.art] + ' ' + wannText(s.zeit))));
       if (!imMonat.length) k.append(el('p', 'klein', 'Noch keine Zeiten in diesem Monat.'));
       liste.replaceChildren(k);
