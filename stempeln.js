@@ -8,6 +8,7 @@
 (function () {
   const ABFRAGE_MS = 60000;
   const ARTEN = { start: 'Start', pause: 'Pause', weiter: 'Pause beenden', stopp: 'Stopp' };
+  const ABWESEND = { urlaub: 'Urlaub', krank: 'Krank', frei: 'Frei' }; // supabase/019_urlaub.sql
 
   function el(tag, klasse, text) {
     const e = document.createElement(tag);
@@ -396,6 +397,8 @@
     const kontoKarte = kontoFormular(() => holen());
     let nachtragKarte = null, nachtragFuer = '';
     const offen = new Set(); // aufgeklappte Personen im Monat
+    const urlaubOffen = new Set(); // aufgeklappte Personen in der Urlaubsübersicht
+    let urlaubKarte = null, urlaubStand = '';
     const vorschauKnopf = el('button', 'st-knopf leise', 'Mitarbeiter-Ansicht ausprobieren');
     vorschauKnopf.addEventListener('click', () => zeigeVorschau(ziel, () => zeigeChef(ziel)));
 
@@ -406,23 +409,26 @@
         const von = new Date(jahr, monat, 1); von.setDate(von.getDate() - 2);
         const bis = new Date(jahr, monat + 1, 1); bis.setDate(bis.getDate() + 1);
         const kurz = new Date(); kurz.setDate(kurz.getDate() - 14);
-        const [p, m, k, o, t] = await Promise.all([
-          window.sb.from('personen').select('user_id, name, stempelt').eq('stempelt', true).order('name'),
+        const [p, m, k, o, t, a, u] = await Promise.all([
+          window.sb.from('personen').select('user_id, name, stempelt, festangestellt, urlaub_ab').eq('stempelt', true).order('name'),
           window.sb.from('stempel').select('*').gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').gte('zeit', kurz.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').eq('status', 'offen').order('zeit'),
-          window.sb.from('taetigkeiten').select('id, user_id, tag, text').gte('tag', tagVon(von)).lt('tag', tagVon(bis)).order('id')
+          window.sb.from('taetigkeiten').select('id, user_id, tag, text').gte('tag', tagVon(von)).lt('tag', tagVon(bis)).order('id'),
+          window.sb.from('abwesenheiten').select('id, user_id, tag, art, automatisch, grund').is('storniert_am', null)
+            .gte('tag', jahr + '-01-01').lte('tag', jahr + '-12-31').order('tag'),
+          window.sb.from('urlaubsanspruch').select('user_id, jahr, tage').eq('jahr', jahr)
         ]);
-        const fehler = p.error || m.error || k.error || o.error || t.error;
+        const fehler = p.error || m.error || k.error || o.error || t.error || a.error || u.error;
         if (fehler) throw fehler;
         if (!box.isConnected) return;
-        zeichnen(p.data || [], m.data || [], k.data || [], o.data || [], taetigkeitenNach(t.data || []));
+        zeichnen(p.data || [], m.data || [], k.data || [], o.data || [], taetigkeitenNach(t.data || []), a.data || [], u.data || []);
       } catch (e) {
         box.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
       } finally { laeuft = false; }
     }
 
-    function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten) {
+    function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten, abwesend, anspruch) {
       const name = {};
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
@@ -491,6 +497,7 @@
         const tage = auswerten(imMonat.filter((s) => s.user_id === p.user_id && s.status === 'gueltig'))
           .filter((t) => t.tag.startsWith(praefix));
         const summe = tage.reduce((s, t) => s + t.arbeitMs, 0);
+        const weg = abwesend.filter((x) => x.user_id === p.user_id && x.tag.startsWith(praefix));
         const d = el('details', 'st-monat');
         d.open = offen.has(p.user_id);
         d.addEventListener('toggle', () => { if (d.open) offen.add(p.user_id); else offen.delete(p.user_id); });
@@ -500,13 +507,20 @@
         if (tage.some((t) => t.stoppFehlt)) zeile.append(el('span', 'marke', 'Stopp fehlt'));
         sum.append(zeile);
         d.append(sum);
-        tage.forEach((t) => {
-          const taetigkeit = taetigkeiten[p.user_id + '|' + t.tag] || '';
-          d.append(tagesZeile(t, taetigkeit));
-          export_.push([p.name, t.tag.split('-').reverse().join('.'), uhr(t.beginn), t.ende ? uhr(t.ende) : '',
-            dezimal(t.pauseMs), dezimal(t.arbeitMs), taetigkeit, [t.stoppFehlt ? 'Stopp fehlt' : '', t.nachtrag ? 'Nachtrag' : ''].filter(Boolean).join(', ')]);
-        });
-        if (!tage.length) d.append(el('p', 'klein', 'Keine Zeiten in diesem Monat.'));
+        // Arbeitstage und Abwesenheiten nach Datum
+        tage.map((t) => ({ tag: t.tag, t })).concat(weg.map((x) => ({ tag: x.tag, x })))
+          .sort((a, b) => (a.tag < b.tag ? -1 : 1)).forEach(({ t, x }) => {
+            if (x) {
+              d.append(abwesendZeile(x));
+              export_.push([p.name, x.tag.split('-').reverse().join('.'), '', '', '', '', '', ABWESEND[x.art] + (x.automatisch ? ' (automatisch)' : '')]);
+              return;
+            }
+            const taetigkeit = taetigkeiten[p.user_id + '|' + t.tag] || '';
+            d.append(tagesZeile(t, taetigkeit));
+            export_.push([p.name, t.tag.split('-').reverse().join('.'), uhr(t.beginn), t.ende ? uhr(t.ende) : '',
+              dezimal(t.pauseMs), dezimal(t.arbeitMs), taetigkeit, [t.stoppFehlt ? 'Stopp fehlt' : '', t.nachtrag ? 'Nachtrag' : ''].filter(Boolean).join(', ')]);
+          });
+        if (!tage.length && !weg.length) d.append(el('p', 'klein', 'Keine Zeiten in diesem Monat.'));
         mk.append(d);
       });
       if (export_.length) {
@@ -516,6 +530,16 @@
       }
       teile.push(mk);
 
+      if (personen.length) {
+        // nur neu bauen, wenn sich etwas geändert hat und niemand gerade tippt
+        const stand = JSON.stringify([jahr, personen, abwesend, anspruch]);
+        if (!urlaubKarte || (stand !== urlaubStand && !urlaubKarte.contains(document.activeElement))) {
+          urlaubStand = stand;
+          urlaubKarte = urlaubUebersicht(personen, abwesend, anspruch);
+        }
+        teile.push(urlaubKarte);
+      }
+
       const fuer = personen.map((p) => p.user_id + p.name).join();
       if (fuer !== nachtragFuer) { nachtragFuer = fuer; nachtragKarte = personen.length ? nachtragFormular(personen, () => holen()) : null; }
       if (nachtragKarte) teile.push(nachtragKarte);
@@ -523,8 +547,115 @@
       box.replaceChildren(...teile);
     }
 
+    // Urlaub des angezeigten Jahres: Anspruch, genommen, Rest; Tage ändern oder eintragen.
+    // Automatisch eingetragen wird nur bei Festangestellten (Wochentag ohne Stempel, siehe 019_urlaub.sql).
+    function urlaubUebersicht(personen, abwesend, anspruch) {
+      const k = el('div', 'st-karte st-formular');
+      k.append(el('h3', null, 'Urlaub ' + jahr));
+      const fest = personen.filter((p) => p.festangestellt);
+      if (!fest.length) k.append(el('p', 'klein', 'Noch niemand ausgewählt. Unten ankreuzen, wer automatisch Urlaub bekommt.'));
+      fest.forEach((p) => {
+        const eigene = abwesend.filter((x) => x.user_id === p.user_id);
+        const urlaub = eigene.filter((x) => x.art === 'urlaub').length;
+        const krank = eigene.filter((x) => x.art === 'krank').length;
+        const a = anspruch.find((x) => x.user_id === p.user_id);
+        const d = el('details', 'st-monat');
+        d.open = urlaubOffen.has(p.user_id);
+        d.addEventListener('toggle', () => { if (d.open) urlaubOffen.add(p.user_id); else urlaubOffen.delete(p.user_id); });
+        const sum = el('summary');
+        const zeile = el('div', 'zeile');
+        zeile.append(el('span', 'name', p.name),
+          el('span', 'klein', a ? urlaub + ' von ' + zahlText(a.tage) + ' genommen' : urlaub + ' genommen'),
+          el('span', 'std', a ? 'Rest ' + zahlText(a.tage - urlaub) : ''));
+        if (!a) zeile.append(el('span', 'marke', 'Anspruch fehlt'));
+        sum.append(zeile);
+        d.append(sum);
+        if (krank) d.append(el('p', 'klein', krank + (krank === 1 ? ' Tag' : ' Tage') + ' krank'));
+
+        // Anspruch
+        const fa = el('form', 'st-zeile');
+        const tage = el('input'); tage.type = 'number'; tage.min = '0'; tage.max = '60'; tage.step = '0.5'; tage.required = true;
+        tage.value = a ? a.tage : ''; tage.placeholder = 'z. B. 24';
+        const la = el('label', null, 'Urlaubsanspruch ' + jahr + ' (Tage)'); la.append(tage);
+        const ka = el('button', null, 'Speichern'); ka.type = 'submit';
+        fa.append(la, ka);
+        fa.addEventListener('submit', async (ev) => {
+          ev.preventDefault(); ka.disabled = true;
+          const { error } = await window.sb.rpc('urlaubsanspruch_setzen', { p_user: p.user_id, p_jahr: jahr, p_tage: Number(tage.value) });
+          ka.disabled = false;
+          if (error) { fa.append(fehlerKasten('Nicht gespeichert', error)); return; }
+          tage.blur(); holen();
+        });
+        d.append(fa);
+
+        eigene.slice().reverse().forEach((x) => d.append(abwesendZeile(x, true)));
+        if (!eigene.length) d.append(el('p', 'klein', 'Noch keine Tage eingetragen.'));
+
+        // Tag von Hand eintragen
+        const fn = el('form', 'st-zeile');
+        const tag = el('input'); tag.type = 'date'; tag.required = true;
+        const art = el('select');
+        Object.entries(ABWESEND).forEach(([w, t]) => { const o = el('option', null, t); o.value = w; art.append(o); });
+        const lt = el('label', null, 'Tag'); lt.append(tag);
+        const lr = el('label', null, 'Art'); lr.append(art);
+        const kn = el('button', null, 'Eintragen'); kn.type = 'submit';
+        fn.append(lt, lr, kn);
+        fn.addEventListener('submit', async (ev) => {
+          ev.preventDefault(); kn.disabled = true;
+          const { error } = await window.sb.rpc('abwesenheit_setzen', { p_user: p.user_id, p_tag: tag.value, p_art: art.value, p_grund: null });
+          kn.disabled = false;
+          if (error) { fn.append(fehlerKasten('Nicht eingetragen', error)); return; }
+          tag.value = ''; tag.blur(); holen();
+        });
+        d.append(fn);
+        k.append(d);
+      });
+
+      // Wer bekommt automatisch Urlaub?
+      const w = el('details', 'st-formular');
+      w.append(el('summary', null, 'Wer bekommt automatisch Urlaub?'));
+      w.append(el('p', 'klein', 'Für Angekreuzte trägt die App jeden Wochentag (außer Feiertagen) ohne Stempel am nächsten Morgen als Urlaub ein – ab dem Tag nach dem Ankreuzen. Minijobber nicht ankreuzen.'));
+      personen.forEach((p) => {
+        const l = el('label', 'st-haken');
+        const c = el('input'); c.type = 'checkbox'; c.checked = !!p.festangestellt;
+        c.addEventListener('change', async () => {
+          c.disabled = true;
+          const { error } = await window.sb.rpc('person_festangestellt_setzen', { p_user: p.user_id, p_an: c.checked });
+          c.disabled = false;
+          if (error) { c.checked = !c.checked; w.append(fehlerKasten('Nicht gespeichert', error)); return; }
+          c.blur(); holen();
+        });
+        l.append(c, el('span', null, p.name + (p.festangestellt && p.urlaub_ab ? ' (ab ' + datumKurz(p.urlaub_ab) + ')' : '')));
+        w.append(l);
+      });
+      k.append(w);
+      return k;
+    }
+
+    // Eine Zeile Urlaub/Krank/Frei; mit aendern = Auswahl zum Ändern oder Streichen
+    function abwesendZeile(x, aendern) {
+      const z = el('div', 'st-tag abwesend');
+      z.append(el('span', 'datum', datumKurz(x.tag)), el('span', 'zeit', ABWESEND[x.art] + (x.automatisch ? ' (automatisch)' : '')));
+      if (aendern) {
+        const s = el('select');
+        Object.entries(ABWESEND).concat([['', 'Streichen']]).forEach(([w, t]) => { const o = el('option', null, t); o.value = w; s.append(o); });
+        s.value = x.art;
+        s.addEventListener('change', async () => {
+          s.disabled = true;
+          const { error } = await window.sb.rpc('abwesenheit_setzen', { p_user: x.user_id, p_tag: x.tag, p_art: s.value || null, p_grund: null });
+          s.disabled = false;
+          if (error) { s.value = x.art; z.append(fehlerKasten('Nicht geändert', error)); return; }
+          s.blur(); holen();
+        });
+        z.append(s);
+      }
+      return z;
+    }
+
     regelmaessig(box, holen);
   }
+
+  function zahlText(n) { return Number(n).toLocaleString('de-DE', { maximumFractionDigits: 1 }); }
 
   // Konto für einen Mitarbeiter anlegen; das vorläufige Kennwort wird nur hier einmal gezeigt
   function kontoFormular(fertig) {

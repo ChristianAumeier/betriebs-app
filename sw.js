@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v29';
+const VERSION = 'v30';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
