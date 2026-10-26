@@ -410,7 +410,7 @@
         const bis = new Date(jahr, monat + 1, 1); bis.setDate(bis.getDate() + 1);
         const kurz = new Date(); kurz.setDate(kurz.getDate() - 14);
         const [p, m, k, o, t, a, s] = await Promise.all([
-          window.sb.from('personen').select('user_id, name, stempelt, festangestellt, urlaub_ab, urlaub_tage_jahr, soll_std_monat').eq('stempelt', true).order('name'),
+          window.sb.from('personen').select('user_id, name, stempelt, festangestellt, urlaub_ab, urlaub_tage_jahr, soll_std_monat, ueberstundenkonto').eq('stempelt', true).order('name'),
           window.sb.from('stempel').select('*').gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').gte('zeit', kurz.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').eq('status', 'offen').order('zeit'),
@@ -583,15 +583,17 @@
         zeile.append(el('span', 'name', p.name),
           el('span', 'klein', kt && kt.urlaubRest !== null ? 'Urlaub ' + zahlText(kt.urlaubRest) : ''),
           el('span', 'std', kt && kt.ueberstunden !== null ? vorzeichen(kt.ueberstunden) + ' Std.' : ''));
-        if (!p.urlaub_tage_jahr || !p.soll_std_monat) zeile.append(el('span', 'marke', 'Angaben fehlen'));
+        const mitKonto = p.ueberstundenkonto !== false;
+        if (!p.urlaub_tage_jahr || (mitKonto && !p.soll_std_monat)) zeile.append(el('span', 'marke', 'Angaben fehlen'));
         sum.append(zeile);
         d.append(sum);
 
         // Stand
         if (kt) {
           const info = [];
-          info.push(kt.start ? 'Startstand am ' + datumKurz(kt.start.stichtag) + ': Urlaub ' + zahlText(kt.start.urlaub_rest) + ' Tage, Überstunden ' +
-            vorzeichen(kt.start.ueberstunden) + ' Std.' : 'Kein Startstand – gezählt ab ' + datumKurz(kt.ab) + ' mit 0.');
+          info.push(kt.start ? 'Startstand am ' + datumKurz(kt.start.stichtag) + ': Urlaub ' + zahlText(kt.start.urlaub_rest) + ' Tage' +
+            (mitKonto ? ', Überstunden ' + vorzeichen(kt.start.ueberstunden) + ' Std.' : '') : 'Kein Startstand – gezählt ab ' + datumKurz(kt.ab) + ' mit 0.');
+          if (!mitKonto) info.push('Festgehalt: kein Überstundenkonto, nur Stunden und Urlaub.');
           if (kt.urlaubRest !== null) info.push('Resturlaub: ' + zahlText(kt.urlaubRest) + ' Tage (eingetragene Urlaubstage abgezogen).');
           if (kt.ueberstunden !== null) {
             info.push('Überstunden bis gestern: ' + vorzeichen(kt.ueberstunden) + ' Std.');
@@ -610,15 +612,31 @@
         const la = el('label', null, 'Urlaubstage pro Jahr'); la.append(tage);
         const ls = el('label', null, 'Std. pro Monat'); ls.append(soll);
         const ka = el('button', null, 'Speichern'); ka.type = 'submit';
-        fa.append(la, ls, ka);
+        if (!mitKonto) soll.required = false;
+        fa.append(la);
+        if (mitKonto) fa.append(ls);
+        fa.append(ka);
         fa.addEventListener('submit', async (ev) => {
           ev.preventDefault(); ka.disabled = true;
-          const { error } = await window.sb.rpc('person_vertrag_setzen', { p_user: p.user_id, p_urlaub_tage_jahr: Number(tage.value), p_soll_std_monat: Number(soll.value) });
+          const { error } = await window.sb.rpc('person_vertrag_setzen', { p_user: p.user_id, p_urlaub_tage_jahr: Number(tage.value),
+            p_soll_std_monat: mitKonto ? Number(soll.value) : (p.soll_std_monat ?? null) });
           ka.disabled = false;
           if (error) { fa.append(fehlerKasten('Nicht gespeichert', error)); return; }
           tage.blur(); soll.blur(); holen();
         });
         d.append(fa);
+        // Überstundenkonto an/aus (021), z. B. aus bei Festgehalt
+        const lk = el('label', 'st-haken');
+        const ck = el('input'); ck.type = 'checkbox'; ck.checked = mitKonto;
+        ck.addEventListener('change', async () => {
+          ck.disabled = true;
+          const { error } = await window.sb.rpc('person_ueberstundenkonto_setzen', { p_user: p.user_id, p_an: ck.checked });
+          ck.disabled = false;
+          if (error) { ck.checked = !ck.checked; d.append(fehlerKasten('Nicht gespeichert', error)); return; }
+          ck.blur(); holen();
+        });
+        lk.append(ck, el('span', null, 'Überstundenkonto führen'));
+        d.append(lk);
 
         eigene.slice().reverse().forEach((x) => d.append(abwesendZeile(x, true)));
         if (!eigene.length) d.append(el('p', 'klein', 'Noch keine Tage eingetragen.'));
@@ -732,7 +750,8 @@
     }
     const monat = gestern.slice(0, 7);
     let ue = start ? Number(start.ueberstunden) : 0, monatIst = 0, monatSoll = 0;
-    if (p.soll_std_monat) {
+    const mitKonto = p.ueberstundenkonto !== false && !!p.soll_std_monat;
+    if (mitKonto) {
       for (let d = ab; d <= gestern; d = tagPlus(d, 1)) {
         const ts = wochentag(d) <= 5 ? sollAm(d) : 0;
         const gut = ts && (feiertag(d) || weg[d] === 'urlaub' || weg[d] === 'krank') ? ts : 0;
@@ -747,7 +766,7 @@
       for (let j = Number(ab.slice(0, 4)) + 1; j <= new Date().getFullYear(); j++) urlaubRest += Number(p.urlaub_tage_jahr);
       urlaubRest -= abwesend.filter((x) => x.art === 'urlaub' && x.tag >= ab).length;
     }
-    return { ab, start: start || null, ueberstunden: p.soll_std_monat ? ue : null, monatIst, monatSoll, urlaubRest };
+    return { ab, start: start || null, ueberstunden: mitKonto ? ue : null, monatIst, monatSoll, urlaubRest };
   }
 
   // Konto für einen Mitarbeiter anlegen; das vorläufige Kennwort wird nur hier einmal gezeigt
