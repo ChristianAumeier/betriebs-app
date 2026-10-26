@@ -409,26 +409,42 @@
         const von = new Date(jahr, monat, 1); von.setDate(von.getDate() - 2);
         const bis = new Date(jahr, monat + 1, 1); bis.setDate(bis.getDate() + 1);
         const kurz = new Date(); kurz.setDate(kurz.getDate() - 14);
-        const [p, m, k, o, t, a, u] = await Promise.all([
-          window.sb.from('personen').select('user_id, name, stempelt, festangestellt, urlaub_ab').eq('stempelt', true).order('name'),
+        const [p, m, k, o, t, a, s] = await Promise.all([
+          window.sb.from('personen').select('user_id, name, stempelt, festangestellt, urlaub_ab, urlaub_tage_jahr, soll_std_monat').eq('stempelt', true).order('name'),
           window.sb.from('stempel').select('*').gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').gte('zeit', kurz.toISOString()).order('zeit'),
           window.sb.from('stempel').select('*').eq('status', 'offen').order('zeit'),
           window.sb.from('taetigkeiten').select('id, user_id, tag, text').gte('tag', tagVon(von)).lt('tag', tagVon(bis)).order('id'),
           window.sb.from('abwesenheiten').select('id, user_id, tag, art, automatisch, grund').is('storniert_am', null)
             .gte('tag', jahr + '-01-01').lte('tag', jahr + '-12-31').order('tag'),
-          window.sb.from('urlaubsanspruch').select('user_id, jahr, tage').eq('jahr', jahr)
+          window.sb.from('konto_start').select('user_id, stichtag, urlaub_rest, ueberstunden')
         ]);
-        const fehler = p.error || m.error || k.error || o.error || t.error || a.error || u.error;
+        const fehler = p.error || m.error || k.error || o.error || t.error || a.error || s.error;
         if (fehler) throw fehler;
+        // Für Resturlaub und Überstunden: alle Stempel und Abwesenheiten seit dem frühesten Startstand
+        const fest = (p.data || []).filter((x) => x.festangestellt);
+        const starts = fest.map((x) => startTag(x, (s.data || []).find((y) => y.user_id === x.user_id))).filter(Boolean).sort();
+        let konten = {};
+        if (starts.length) {
+          const ab = new Date(starts[0] + 'T00:00:00'); ab.setDate(ab.getDate() - 1);
+          const [ks, ka] = await Promise.all([
+            window.sb.from('stempel').select('*').eq('status', 'gueltig').gte('zeit', ab.toISOString()).order('zeit'),
+            window.sb.from('abwesenheiten').select('user_id, tag, art').is('storniert_am', null).gte('tag', starts[0]).order('tag')
+          ]);
+          if (ks.error || ka.error) throw ks.error || ka.error;
+          fest.forEach((x) => {
+            konten[x.user_id] = konto(x, (s.data || []).find((y) => y.user_id === x.user_id),
+              ks.data.filter((y) => y.user_id === x.user_id), ka.data.filter((y) => y.user_id === x.user_id));
+          });
+        }
         if (!box.isConnected) return;
-        zeichnen(p.data || [], m.data || [], k.data || [], o.data || [], taetigkeitenNach(t.data || []), a.data || [], u.data || []);
+        zeichnen(p.data || [], m.data || [], k.data || [], o.data || [], taetigkeitenNach(t.data || []), a.data || [], konten);
       } catch (e) {
         box.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
       } finally { laeuft = false; }
     }
 
-    function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten, abwesend, anspruch) {
+    function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten, abwesend, konten) {
       const name = {};
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
@@ -532,10 +548,10 @@
 
       if (personen.length) {
         // nur neu bauen, wenn sich etwas geändert hat und niemand gerade tippt
-        const stand = JSON.stringify([jahr, personen, abwesend, anspruch]);
+        const stand = JSON.stringify([jahr, personen, abwesend, konten]);
         if (!urlaubKarte || (stand !== urlaubStand && !urlaubKarte.contains(document.activeElement))) {
           urlaubStand = stand;
-          urlaubKarte = urlaubUebersicht(personen, abwesend, anspruch);
+          urlaubKarte = urlaubUebersicht(personen, abwesend, konten);
         }
         teile.push(urlaubKarte);
       }
@@ -547,44 +563,60 @@
       box.replaceChildren(...teile);
     }
 
-    // Urlaub des angezeigten Jahres: Anspruch, genommen, Rest; Tage ändern oder eintragen.
+    // Resturlaub und Überstunden je Festangestelltem (siehe konto()), dazu die Urlaubs-/Krank-/Frei-Tage des angezeigten Jahres.
     // Automatisch eingetragen wird nur bei Festangestellten (Wochentag ohne Stempel, siehe 019_urlaub.sql).
-    function urlaubUebersicht(personen, abwesend, anspruch) {
+    function urlaubUebersicht(personen, abwesend, konten) {
       const k = el('div', 'st-karte st-formular');
-      k.append(el('h3', null, 'Urlaub ' + jahr));
+      k.append(el('h3', null, 'Urlaub und Überstunden'));
       const fest = personen.filter((p) => p.festangestellt);
       if (!fest.length) k.append(el('p', 'klein', 'Noch niemand ausgewählt. Unten ankreuzen, wer automatisch Urlaub bekommt.'));
       fest.forEach((p) => {
         const eigene = abwesend.filter((x) => x.user_id === p.user_id);
         const urlaub = eigene.filter((x) => x.art === 'urlaub').length;
         const krank = eigene.filter((x) => x.art === 'krank').length;
-        const a = anspruch.find((x) => x.user_id === p.user_id);
+        const kt = konten[p.user_id];
         const d = el('details', 'st-monat');
         d.open = urlaubOffen.has(p.user_id);
         d.addEventListener('toggle', () => { if (d.open) urlaubOffen.add(p.user_id); else urlaubOffen.delete(p.user_id); });
         const sum = el('summary');
         const zeile = el('div', 'zeile');
         zeile.append(el('span', 'name', p.name),
-          el('span', 'klein', a ? urlaub + ' von ' + zahlText(a.tage) + ' genommen' : urlaub + ' genommen'),
-          el('span', 'std', a ? 'Rest ' + zahlText(a.tage - urlaub) : ''));
-        if (!a) zeile.append(el('span', 'marke', 'Anspruch fehlt'));
+          el('span', 'klein', kt && kt.urlaubRest !== null ? 'Urlaub ' + zahlText(kt.urlaubRest) : ''),
+          el('span', 'std', kt && kt.ueberstunden !== null ? vorzeichen(kt.ueberstunden) + ' Std.' : ''));
+        if (!p.urlaub_tage_jahr || !p.soll_std_monat) zeile.append(el('span', 'marke', 'Angaben fehlen'));
         sum.append(zeile);
         d.append(sum);
-        if (krank) d.append(el('p', 'klein', krank + (krank === 1 ? ' Tag' : ' Tage') + ' krank'));
 
-        // Anspruch
+        // Stand
+        if (kt) {
+          const info = [];
+          info.push(kt.start ? 'Startstand am ' + datumKurz(kt.start.stichtag) + ': Urlaub ' + zahlText(kt.start.urlaub_rest) + ' Tage, Überstunden ' +
+            vorzeichen(kt.start.ueberstunden) + ' Std.' : 'Kein Startstand – gezählt ab ' + datumKurz(kt.ab) + ' mit 0.');
+          if (kt.urlaubRest !== null) info.push('Resturlaub: ' + zahlText(kt.urlaubRest) + ' Tage (eingetragene Urlaubstage abgezogen).');
+          if (kt.ueberstunden !== null) {
+            info.push('Überstunden bis gestern: ' + vorzeichen(kt.ueberstunden) + ' Std.');
+            if (kt.monatSoll) info.push('Diesen Monat bis gestern: gearbeitet ' + zahlText(kt.monatIst) + ' Std. (mit Urlaub/Krank/Feiertag), Soll ' + zahlText(kt.monatSoll) + ' Std.');
+          }
+          info.forEach((t) => d.append(el('p', 'klein', t)));
+        }
+        d.append(el('p', 'klein', jahr + ': ' + urlaub + (urlaub === 1 ? ' Tag' : ' Tage') + ' Urlaub' + (krank ? ', ' + krank + (krank === 1 ? ' Tag' : ' Tage') + ' krank' : '') + ' eingetragen'));
+
+        // Urlaubstage pro Jahr und Sollstunden pro Monat
         const fa = el('form', 'st-zeile');
         const tage = el('input'); tage.type = 'number'; tage.min = '0'; tage.max = '60'; tage.step = '0.5'; tage.required = true;
-        tage.value = a ? a.tage : ''; tage.placeholder = 'z. B. 24';
-        const la = el('label', null, 'Urlaubsanspruch ' + jahr + ' (Tage)'); la.append(tage);
+        tage.value = p.urlaub_tage_jahr ?? ''; tage.placeholder = 'z. B. 24';
+        const soll = el('input'); soll.type = 'number'; soll.min = '0'; soll.max = '300'; soll.step = '0.5'; soll.required = true;
+        soll.value = p.soll_std_monat ?? ''; soll.placeholder = 'z. B. 173';
+        const la = el('label', null, 'Urlaubstage pro Jahr'); la.append(tage);
+        const ls = el('label', null, 'Std. pro Monat'); ls.append(soll);
         const ka = el('button', null, 'Speichern'); ka.type = 'submit';
-        fa.append(la, ka);
+        fa.append(la, ls, ka);
         fa.addEventListener('submit', async (ev) => {
           ev.preventDefault(); ka.disabled = true;
-          const { error } = await window.sb.rpc('urlaubsanspruch_setzen', { p_user: p.user_id, p_jahr: jahr, p_tage: Number(tage.value) });
+          const { error } = await window.sb.rpc('person_vertrag_setzen', { p_user: p.user_id, p_urlaub_tage_jahr: Number(tage.value), p_soll_std_monat: Number(soll.value) });
           ka.disabled = false;
           if (error) { fa.append(fehlerKasten('Nicht gespeichert', error)); return; }
-          tage.blur(); holen();
+          tage.blur(); soll.blur(); holen();
         });
         d.append(fa);
 
@@ -656,6 +688,67 @@
   }
 
   function zahlText(n) { return Number(n).toLocaleString('de-DE', { maximumFractionDigits: 1 }); }
+  function vorzeichen(n) { const r = Math.round(n * 10) / 10; return (r > 0 ? '+' : '') + zahlText(r); }
+
+  // Gesetzliche Feiertage in Bayern (gleich wie public.feiertag_bayern in 019_urlaub.sql)
+  function feiertag(tag) {
+    const [j, mo, t] = tag.split('-').map(Number);
+    const a = j % 19, b = Math.floor(j / 100), c = j % 100, k = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - k - g + 15) % 30;
+    const i = Math.floor(c / 4), l = (32 + 2 * e + 2 * i - h - c % 4) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const ostern = Date.UTC(j, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1);
+    const abOstern = Math.round((Date.UTC(j, mo - 1, t) - ostern) / 86400000);
+    const md = tag.slice(5);
+    return ['01-01', '01-06', '05-01', '08-15', '10-03', '11-01', '12-25', '12-26'].includes(md) || [-2, 1, 39, 50, 60].includes(abOstern);
+  }
+  // „2026-10-27“ ± Tage, als Text; Wochentag 1 = Mo … 7 = So
+  function tagPlus(tag, n) { const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function wochentag(tag) { return new Date(tag + 'T12:00:00Z').getUTCDay() || 7; }
+
+  // Erster gezählter Tag: Tag nach dem Startstand, sonst der Beginn des automatischen Urlaubs
+  function startTag(p, start) { return start ? tagPlus(start.stichtag, 1) : p.urlaub_ab || null; }
+
+  // Resturlaub und Überstundenkonto einer Person bis gestern (020_konten.sql)
+  //   Tagessoll = Sollstunden pro Monat / Wochentage (Mo–Fr) des Monats
+  //   Überstunden = Start + gearbeitet + Tagessoll je Urlaubs-/Krank-/Feiertag − Tagessoll je Wochentag; „Frei“ ohne Gutschrift
+  //   Resturlaub = Start + Urlaubstage pro Jahr ab jedem neuen Jahr − eingetragene Urlaubstage
+  function konto(p, start, stempel, abwesend) {
+    const ab = startTag(p, start);
+    if (!ab) return null;
+    const gestern = tagPlus(tagVon(new Date()), -1);
+    const arbeit = {};
+    auswerten(stempel).forEach((t) => { arbeit[t.tag] = t.arbeitMs / 3600000; });
+    const weg = {};
+    abwesend.forEach((x) => { weg[x.tag] = x.art; });
+    const tagessoll = {};
+    function sollAm(tag) {
+      const mon = tag.slice(0, 7);
+      if (!(mon in tagessoll)) {
+        let n = 0;
+        for (let d = mon + '-01'; d.startsWith(mon); d = tagPlus(d, 1)) if (wochentag(d) <= 5) n++;
+        tagessoll[mon] = p.soll_std_monat / n;
+      }
+      return tagessoll[mon];
+    }
+    const monat = gestern.slice(0, 7);
+    let ue = start ? Number(start.ueberstunden) : 0, monatIst = 0, monatSoll = 0;
+    if (p.soll_std_monat) {
+      for (let d = ab; d <= gestern; d = tagPlus(d, 1)) {
+        const ts = wochentag(d) <= 5 ? sollAm(d) : 0;
+        const gut = ts && (feiertag(d) || weg[d] === 'urlaub' || weg[d] === 'krank') ? ts : 0;
+        const ist = (arbeit[d] || 0) + gut;
+        ue += ist - ts;
+        if (d.startsWith(monat)) { monatIst += ist; monatSoll += ts; }
+      }
+    }
+    let urlaubRest = null;
+    if (p.urlaub_tage_jahr !== null && p.urlaub_tage_jahr !== undefined) {
+      urlaubRest = start ? Number(start.urlaub_rest) : 0;
+      for (let j = Number(ab.slice(0, 4)) + 1; j <= new Date().getFullYear(); j++) urlaubRest += Number(p.urlaub_tage_jahr);
+      urlaubRest -= abwesend.filter((x) => x.art === 'urlaub' && x.tag >= ab).length;
+    }
+    return { ab, start: start || null, ueberstunden: p.soll_std_monat ? ue : null, monatIst, monatSoll, urlaubRest };
+  }
 
   // Konto für einen Mitarbeiter anlegen; das vorläufige Kennwort wird nur hier einmal gezeigt
   function kontoFormular(fertig) {
