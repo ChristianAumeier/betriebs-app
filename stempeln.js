@@ -7,7 +7,7 @@
 
 (function () {
   const ABFRAGE_MS = 60000;
-  const ARTEN = { start: 'Start', pause: 'Pause', weiter: 'Weiter nach Pause', stopp: 'Stopp' };
+  const ARTEN = { start: 'Start', pause: 'Pause', weiter: 'Pause beenden', stopp: 'Stopp' };
 
   function el(tag, klasse, text) {
     const e = document.createElement(tag);
@@ -190,6 +190,8 @@
     let taetigkeiten = {};
     let schichtTag = null;      // Tag, an dem die laufende Schicht begann
     let stoppFragen = false;    // Feld „Was hast du gemacht?“ ist offen
+    let pauseSeit = null;       // Beginn der laufenden Pause
+    let gesperrt = false;       // nach einem Tipp kurz gesperrt, damit doppeltes Tippen nicht den nächsten Knopf trifft
     const stopp = stoppFormular();
     box.append(oben, nachtragFormular(null, () => holen(), sb), liste);
     ziel.replaceChildren(box);
@@ -243,6 +245,10 @@
     }
 
     async function druecken(art, knopf) {
+      if (gesperrt) return;
+      // Pause gerade erst begonnen: nachfragen, ob sie wirklich schon zu Ende ist
+      if (art === 'weiter' && pauseSeit && Date.now() - new Date(pauseSeit).getTime() < 60000 &&
+          !confirm('Die Pause läuft erst seit wenigen Sekunden. Pause wirklich schon beenden?')) return;
       // Stopp: erst fragen, was gemacht wurde (außer es steht schon da)
       if (art === 'stopp' && !taetigkeiten[uid + '|' + schichtTag]) {
         stoppFragen = true;
@@ -250,10 +256,15 @@
         stopp.text.focus();
         return;
       }
+      gesperrt = true;
       knopf.disabled = true;
       const { error } = await sb.rpc('stempeln', { p_art: art });
-      if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; return; }
-      holen();
+      if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; gesperrt = false; return; }
+      await holen();
+      setTimeout(() => {
+        gesperrt = false;
+        oben.querySelectorAll('.st-knopf').forEach((k) => { k.disabled = false; });
+      }, 1500);
     }
 
     function zeichnen(stempel) {
@@ -263,18 +274,21 @@
       const starts = stempel.filter((x) => x.art === 'start' && x.status !== 'abgelehnt');
       schichtTag = z.art !== 'aus' && starts.length ? tagVon(starts[starts.length - 1].zeit) : null;
       if (z.art === 'aus') stoppFragen = false;
+      pauseSeit = z.art === 'pause' ? z.seit : null;
 
       const karte = el('div', 'st-karte st-status ' + z.art);
       karte.append(el('div', 'gross',
-        z.art === 'arbeitet' ? 'Arbeitet seit ' + uhr(z.seit) : z.art === 'pause' ? 'Pause seit ' + uhr(z.seit) : 'Nicht eingestempelt'));
+        z.art === 'arbeitet' ? 'Arbeitet seit ' + uhr(z.seit) : z.art === 'pause' ? 'Pause läuft seit ' + uhr(z.seit) : 'Nicht eingestempelt'));
+      if (z.art === 'pause') karte.append(el('div', 'klein', 'Wenn du wieder anfängst: „Pause beenden“ drücken.'));
       karte.append(el('div', 'klein', 'Heute gearbeitet: ' + stunden(heute ? heute.arbeitMs : 0)));
       if (stoppFragen) {
         karte.append(stopp.f);
       } else {
         const knoepfe = el('div', 'st-knoepfe');
-        const plan = z.art === 'aus' ? [['start', 'Start']] : z.art === 'arbeitet' ? [['pause', 'Pause'], ['stopp', 'Stopp']] : [['weiter', 'Weiter'], ['stopp', 'Stopp']];
+        const plan = z.art === 'aus' ? [['start', 'Start']] : z.art === 'arbeitet' ? [['pause', 'Pause'], ['stopp', 'Stopp']] : [['weiter', 'Pause beenden'], ['stopp', 'Stopp']];
         plan.forEach(([art, text]) => {
           const k = el('button', 'st-knopf ' + art, text);
+          k.disabled = gesperrt;
           k.addEventListener('click', () => druecken(art, k));
           knoepfe.append(k);
         });
