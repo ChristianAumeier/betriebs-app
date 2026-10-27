@@ -8,6 +8,7 @@
   const ABRUF_ALT_MIN = 15;          // so alt darf der letzte erfolgreiche Abruf sein
   const SONNE_W = 1000;              // ab dieser Leistung bei einer Anlage gilt „Sonne scheint“
   const SCHWACH_ANTEIL = 0.6;        // weniger als 60 % der anderen = auffällig
+  const KWP = 120;                   // Anlagengröße Stockhalle (Growatt-Anlage „Stockhalle“, 4 × 30 kWp)
 
   function istZahl(x) { return typeof x === 'number' && isFinite(x); }
   function zahl(x, stellen) {
@@ -35,6 +36,26 @@
     return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
   }
   function zahlOderNull(x) { return x === null || x === undefined ? null : Number(x); }
+  // Heutiges Datum in deutscher Zeit als JJJJ-MM-TT (wie pv_tag.tag)
+  function tagBerlin(d) {
+    return d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+  }
+  function tagText(iso) {
+    const [j, m, t] = iso.split('-');
+    return t + '.' + m + '.' + j;
+  }
+
+  // Tageswerte seit Jahresbeginn; Supabase liefert höchstens 1000 Zeilen je Anfrage, deshalb seitenweise
+  async function tageswerteHolen(abTag) {
+    const zeilen = [];
+    for (let von = 0; ; von += 1000) {
+      const r = await window.sb.from('pv_tag').select('sn, tag, kwh').gte('tag', abTag)
+        .order('tag').order('sn').range(von, von + 999);
+      if (r.error) throw r.error;
+      zeilen.push(...(r.data || []));
+      if (!r.data || r.data.length < 1000) return zeilen;
+    }
+  }
 
   // Ansicht öffnen: Daten holen, jede Minute neu holen; beim Verlassen hört alles auf.
   function zeigePvStockhalle(ziel) {
@@ -50,15 +71,16 @@
       if (laeuft || !box.isConnected) return;
       laeuft = true;
       try {
-        const [w, l, a] = await Promise.all([
+        const [w, l, a, tage] = await Promise.all([
           window.sb.from('pv_wechselrichter').select('*').eq('anlage', 'Stockhalle').order('sortierung'),
           window.sb.from('pv_live').select('sn, gemeldet_am, leistung_w, heute_kwh, gesamt_kwh, temperatur, stick'),
-          window.sb.from('pv_abruf').select('*').maybeSingle()
+          window.sb.from('pv_abruf').select('*').maybeSingle(),
+          tageswerteHolen(tagBerlin(new Date()).slice(0, 4) + '-01-01')
         ]);
         if (!box.isConnected) return;
         const fehler = w.error || l.error || a.error;
         if (fehler) throw fehler;
-        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data);
+        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data, tage);
       } catch (e) {
         if (!box.isConnected) return;
         const text = (e && e.message) ? e.message + (e.code ? ' (' + e.code + ')' : '') : String(e);
@@ -81,7 +103,7 @@
     holen();
   }
 
-  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf) {
+  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf, tage) {
     const jetzt = Date.now();
     const heute = heuteBerlin(new Date());
     const nachSn = {};
@@ -158,6 +180,33 @@
       d.append(el('div', 'zahl', z), el('div', 'text', t));
       gesamt.append(d);
     });
+
+    // Spezifischer Ertrag (kWh pro kWp): vergangene Tage aus pv_tag, heute wie oben aus den Live-Werten
+    const heuteIso = tagBerlin(new Date());
+    const monatAb = heuteIso.slice(0, 8) + '01';
+    const jahrAb = heuteIso.slice(0, 5) + '01-01';
+    const unsere = new Set(wechselrichter.map((x) => x.sn));
+    const vorher = (tage || []).filter((t) => unsere.has(t.sn) && t.tag < heuteIso && istZahl(Number(t.kwh)));
+    const summeAb = (ab) => vorher.filter((t) => t.tag >= ab).reduce((s, t) => s + Number(t.kwh), 0) + summeHeute;
+    const ersterTag = vorher.length ? vorher[0].tag : heuteIso;
+    const spez = el('div', 'ph-spez');
+    spez.append(el('div', 'titel', 'kWh pro kWp (' + KWP + ' kWp)'));
+    const spezWerte = el('div', 'werte');
+    [
+      [heuteWerte.length ? zahl(summeHeute / KWP, 2) : '–', 'heute'],
+      [heuteWerte.length || vorher.length ? zahl(summeAb(monatAb) / KWP, 2) : '–', 'Monat'],
+      [heuteWerte.length || vorher.length ? zahl(summeAb(jahrAb) / KWP, 2) : '–', 'Jahr']
+    ].forEach(([z, t]) => {
+      const d = el('div');
+      d.append(el('div', 'zahl', z), el('div', 'text', t));
+      spezWerte.append(d);
+    });
+    spez.append(spezWerte);
+    if (ersterTag > monatAb || ersterTag > jahrAb) {
+      spez.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
+        + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
+    }
+    gesamt.append(spez);
     box.append(gesamt);
 
     // Je Anlage eine Karte, Reihenfolge wie an der Wand von links: Anlage 4, 3, 2, 1
