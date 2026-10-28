@@ -193,10 +193,118 @@
     let stoppFragen = false;    // Feld „Was hast du gemacht?“ ist offen
     let pauseSeit = null;       // Beginn der laufenden Pause
     let gesperrt = false;       // nach einem Tipp kurz gesperrt, damit doppeltes Tippen nicht den nächsten Knopf trifft
+    // Urlaub/Frei/Krank (022): nur für Festangestellte
+    let person = null, start = null, abwesend = [];
+    let offen = [];             // Werktage ohne Stempel und ohne Eintrag, die der Mitarbeiter selbst klären darf
+    let fragen = false;         // Nachfrage zu offenen Tagen vor dem Start ist offen
+    let spaeter = false;        // „Später“ gewählt: einmal ohne Nachfrage starten
+    let arbeit = null;          // offenes Formular „Gearbeitet“ { tag, f }
+    const fragMeldung = el('div');
     const stopp = stoppFormular();
+    const vorab = vorabFormular();
     box.append(oben, nachtragFormular(null, () => holen(), sb), liste);
     ziel.replaceChildren(box);
     let laeuft = false;
+
+    // Für einen offenen Tag nachtragen, dass gearbeitet wurde (Nachträge warten auf Freigabe)
+    function arbeitFormular(tag) {
+      const f = el('form', 'st st-formular');
+      const von = el('input'); von.type = 'time'; von.required = true;
+      const bis = el('input'); bis.type = 'time'; bis.required = true;
+      const pv = el('input'); pv.type = 'time';
+      const pb = el('input'); pb.type = 'time';
+      const text = el('textarea'); text.rows = 2; text.maxLength = 500; text.required = true;
+      text.placeholder = 'z. B. meißeliert, Maschinen gewaschen';
+      const z1 = el('div', 'st-zeile'), z2 = el('div', 'st-zeile');
+      [[z1, 'Beginn', von], [z1, 'Ende', bis], [z2, 'Pause von', pv], [z2, 'Pause bis', pb]].forEach(([z, t, feld]) => {
+        const l = el('label', null, t); l.append(feld); z.append(l);
+      });
+      const lt = el('label', null, 'Was hast du an dem Tag gemacht?'); lt.append(text);
+      const knoepfe = el('div', 'st-knoepfe klein');
+      const ok = el('button', 'st-knopf start', 'Nachtrag senden'); ok.type = 'submit';
+      const zurueck = el('button', 'st-knopf leise', 'Abbrechen'); zurueck.type = 'button';
+      knoepfe.append(zurueck, ok);
+      const meldung = el('div');
+      f.append(el('p', 'klein', 'Pause leer lassen, wenn keine war. Der Nachtrag gilt, sobald Christian ihn freigibt.'), z1, z2, lt, knoepfe, meldung);
+      zurueck.addEventListener('click', () => { arbeit = null; holen(); });
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        meldung.replaceChildren();
+        const zeit = (u) => new Date(tag + 'T' + u).toISOString();
+        const folge = [['start', von.value]];
+        if (pv.value || pb.value) {
+          if (!pv.value || !pb.value) { meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Bitte bei der Pause von und bis ausfüllen.')); return; }
+          folge.push(['pause', pv.value], ['weiter', pb.value]);
+        }
+        folge.push(['stopp', bis.value]);
+        if (folge.some((x, i) => i && x[1] <= folge[i - 1][1])) {
+          meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Die Uhrzeiten passen nicht zusammen (Beginn vor Pause vor Ende).'));
+          return;
+        }
+        ok.disabled = true;
+        const t = await sb.rpc('taetigkeit_speichern', { p_tag: tag, p_text: text.value });
+        if (t.error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+        for (const [art, u] of folge) {
+          const { error } = await sb.rpc('stempel_nachtragen', { p_art: art, p_zeit: zeit(u), p_grund: 'Stempeln vergessen', p_user: null });
+          if (error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
+        }
+        arbeit = null;
+        await holen();
+        weiterNachFrage();
+      });
+      return { tag, f };
+    }
+
+    // Urlaub, Frei oder Krank für offene Tage; danach weiter mit dem Start
+    async function setzen(tage, art, knopf) {
+      knopf.disabled = true;
+      fragMeldung.replaceChildren();
+      for (const t of tage) {
+        const { error } = await sb.rpc('abwesenheit_selbst', { p_von: t, p_bis: t, p_art: art });
+        if (error) { knopf.disabled = false; fragMeldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
+      }
+      if (arbeit && tage.includes(arbeit.tag)) arbeit = null;
+      await holen();
+      weiterNachFrage();
+    }
+    function weiterNachFrage() {
+      if (fragen && !offen.length) { fragen = false; druecken('start'); }
+    }
+
+    // Vorab eintragen (z. B. Urlaub nächste Woche) oder eigene Einträge streichen; einmal gebaut
+    function vorabFormular() {
+      const d = el('details', 'st-karte st-formular');
+      d.append(el('summary', null, 'Urlaub oder frei eintragen'));
+      const f = el('form', 'st');
+      const z = el('div', 'st-zeile');
+      const von = el('input'); von.type = 'date'; von.required = true;
+      const bis = el('input'); bis.type = 'date';
+      const art = el('select');
+      [['urlaub', 'Urlaub'], ['frei', 'Frei (Stunden abbauen)'], ['krank', 'Krank'], ['', 'Eintrag streichen']].forEach(([w, t]) => {
+        const o = el('option', null, t); o.value = w; art.append(o);
+      });
+      [['Von', von], ['Bis (leer = nur ein Tag)', bis]].forEach(([t, feld]) => { const l = el('label', null, t); l.append(feld); z.append(l); });
+      const la = el('label', null, 'Was'); la.append(art);
+      const knopf = el('button', null, 'Eintragen'); knopf.type = 'submit';
+      const meldung = el('div');
+      const geplant = el('div', 'st');
+      f.append(el('p', 'klein', 'Wochenenden, Feiertage und Tage mit Stempel werden übersprungen. Was Christian eingetragen hat, kann nur er ändern.'),
+        z, la, knopf, meldung);
+      d.append(f, geplant);
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        knopf.disabled = true;
+        meldung.replaceChildren();
+        const { data, error } = await sb.rpc('abwesenheit_selbst', { p_von: von.value, p_bis: bis.value || von.value, p_art: art.value || null });
+        knopf.disabled = false;
+        if (error) { meldung.replaceChildren(fehlerKasten('Nicht eingetragen', error)); return; }
+        meldung.replaceChildren(el('div', 'st-hinweis' + (data ? ' ok' : ''), data ? (data === 1 ? '1 Tag' : data + ' Tage') + (art.value ? ' eingetragen.' : ' gestrichen.')
+          : 'Nichts geändert (Wochenende, Feiertag, schon so eingetragen, gestempelt oder von Christian eingetragen).'));
+        von.value = ''; bis.value = ''; von.blur(); bis.blur();
+        holen();
+      });
+      return { d, geplant };
+    }
 
     // Einmal gebaut, damit der Text das minütliche Neuladen übersteht
     function stoppFormular() {
@@ -233,12 +341,26 @@
       try {
         const ab = new Date(); ab.setDate(1); ab.setHours(0, 0, 0, 0); ab.setDate(ab.getDate() - 3);
         uid = uid || (await sb.auth.getUser()).data.user.id;
-        const [s, t] = await Promise.all([
-          sb.from('stempel').select('*').eq('user_id', uid).gte('zeit', ab.toISOString()).order('zeit'),
-          sb.from('taetigkeiten').select('id, user_id, tag, text').eq('user_id', uid).gte('tag', tagVon(ab)).order('id')
+        const [pe, ks] = await Promise.all([
+          sb.from('personen').select('user_id, name, festangestellt, urlaub_ab, urlaub_tage_jahr, soll_std_monat, ueberstundenkonto').eq('user_id', uid).maybeSingle(),
+          sb.from('konto_start').select('user_id, stichtag, urlaub_rest, ueberstunden').eq('user_id', uid).maybeSingle()
         ]);
-        if (s.error || t.error) throw s.error || t.error;
+        if (pe.error || ks.error) throw pe.error || ks.error;
+        person = pe.data && pe.data.festangestellt ? pe.data : null;
+        start = ks.data || null;
+        // Für das Konto alle Stempel seit dem ersten gezählten Tag
+        const kab = person ? startTag(person, start) : null;
+        const sab = kab && new Date(kab + 'T00:00:00') < ab ? new Date(kab + 'T00:00:00') : new Date(ab);
+        sab.setDate(sab.getDate() - 1);
+        const [s, t, a] = await Promise.all([
+          sb.from('stempel').select('*').eq('user_id', uid).gte('zeit', sab.toISOString()).order('zeit'),
+          sb.from('taetigkeiten').select('id, user_id, tag, text').eq('user_id', uid).gte('tag', tagVon(ab)).order('id'),
+          person ? sb.from('abwesenheiten').select('id, user_id, tag, art, automatisch, grund, angelegt_von').eq('user_id', uid).is('storniert_am', null).order('tag')
+            : Promise.resolve({ data: [], error: null })
+        ]);
+        if (s.error || t.error || a.error) throw s.error || t.error || a.error;
         taetigkeiten = taetigkeitenNach(t.data || []);
+        abwesend = a.data || [];
         zeichnen(s.data || []);
       } catch (e) {
         oben.replaceChildren(fehlerKasten('Zeiten konnten nicht geladen werden', e));
@@ -247,6 +369,14 @@
 
     async function druecken(art, knopf) {
       if (gesperrt) return;
+      // Start: erst fragen, was an offenen Tagen war (gearbeitet, frei, Urlaub, krank)
+      if (art === 'start' && offen.length && !spaeter) {
+        fragen = true;
+        await holen();
+        window.scrollTo(0, 0);
+        return;
+      }
+      spaeter = false;
       // Pause gerade erst begonnen: nachfragen, ob sie wirklich schon zu Ende ist
       if (art === 'weiter' && pauseSeit && Date.now() - new Date(pauseSeit).getTime() < 60000 &&
           !confirm('Die Pause läuft erst seit wenigen Sekunden. Pause wirklich schon beenden?')) return;
@@ -258,9 +388,9 @@
         return;
       }
       gesperrt = true;
-      knopf.disabled = true;
+      if (knopf) knopf.disabled = true;
       const { error } = await sb.rpc('stempeln', { p_art: art });
-      if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); knopf.disabled = false; gesperrt = false; return; }
+      if (error) { oben.append(fehlerKasten('Hat nicht geklappt', error)); if (knopf) knopf.disabled = false; gesperrt = false; return; }
       await holen();
       setTimeout(() => {
         gesperrt = false;
@@ -276,6 +406,17 @@
       schichtTag = z.art !== 'aus' && starts.length ? tagVon(starts[starts.length - 1].zeit) : null;
       if (z.art === 'aus') stoppFragen = false;
       pauseSeit = z.art === 'pause' ? z.seit : null;
+      const kt = person ? konto(person, start, stempel, abwesend) : null;
+      const frueh = selbstAb();
+      offen = kt ? kt.offen.filter((t) => t >= frueh) : [];
+      if (z.art !== 'aus') fragen = false;
+
+      // fragen bleibt nach dem letzten geklärten Tag stehen, bis weiterNachFrage() einstempelt
+      if (fragen && offen.length) {
+        oben.replaceChildren(frageKarte(kt));
+        zeichnenListe(stempel, tage, kt);
+        return;
+      }
 
       const karte = el('div', 'st-karte st-status ' + z.art);
       karte.append(el('div', 'gross',
@@ -302,18 +443,108 @@
         teile.push(el('div', 'st-hinweis', 'Du bist seit ' + wannText(z.seit) + ' eingestempelt. Stopp vergessen? Dann unten den Stopp nachtragen.'));
       }
       oben.replaceChildren(...teile);
+      zeichnenListe(stempel, tage, kt);
+    }
+
+    // Nachfrage vor dem Start: für jeden offenen Tag gearbeitet / frei / Urlaub / krank
+    function frageKarte(kt) {
+      const k = el('div', 'st-karte st-frage');
+      k.append(el('h3', null, offen.length === 1 ? 'Bevor du anfängst: Für diesen Tag ist nichts eingetragen.' : 'Bevor du anfängst: Für diese Tage ist nichts eingetragen.'));
+      k.append(el('p', 'klein', kontoText(kt)));
+      if (offen.length > 1) {
+        const z = el('div', 'st-fragzeile alle');
+        z.append(el('span', 'datum', 'Alle ' + offen.length + ' Tage:'));
+        [['frei', 'Frei'], ['urlaub', 'Urlaub'], ['krank', 'Krank']].forEach(([w, t]) => {
+          const b = el('button', 'st-wahl ' + w, t); b.type = 'button';
+          b.addEventListener('click', () => setzen(offen.slice(), w, b));
+          z.append(b);
+        });
+        k.append(z);
+      }
+      offen.forEach((tag) => {
+        const z = el('div', 'st-fragzeile');
+        z.append(el('span', 'datum', datumKurz(tag)));
+        const g = el('button', 'st-wahl arbeit', 'Gearbeitet'); g.type = 'button';
+        g.addEventListener('click', () => { arbeit = arbeitFormular(tag); holen(); });
+        z.append(g);
+        [['frei', 'Frei'], ['urlaub', 'Urlaub'], ['krank', 'Krank']].forEach(([w, t]) => {
+          const b = el('button', 'st-wahl ' + w, t); b.type = 'button';
+          b.addEventListener('click', () => setzen([tag], w, b));
+          z.append(b);
+        });
+        k.append(z);
+        if (arbeit && arbeit.tag === tag) k.append(arbeit.f);
+      });
+      k.append(el('p', 'klein', 'Frei = Stunden vom Stundenkonto abbauen, Urlaub bleibt. Urlaub = ein Urlaubstag, das Stundenkonto bleibt gleich.'));
+      const spaet = el('button', 'st-knopf leise', 'Später – jetzt erst einstempeln'); spaet.type = 'button';
+      spaet.addEventListener('click', () => { spaeter = true; fragen = false; arbeit = null; druecken('start', spaet); });
+      k.append(fragMeldung, spaet);
+      return k;
+    }
+
+    function kontoText(kt) {
+      const t = [];
+      if (kt && kt.ueberstunden !== null) t.push('Stundenkonto: ' + vorzeichen(kt.ueberstunden) + ' Std.');
+      if (kt && kt.urlaubRest !== null) t.push('Resturlaub: ' + zahlText(kt.urlaubRest) + ' Tage');
+      return t.join(' · ');
+    }
+
+    // Unten: mein Konto, Urlaub/Frei vorab, Zeiten und Abwesenheiten des Monats
+    function zeichnenListe(stempel, tage, kt) {
+      const teile = [];
+      if (kt) {
+        const kk = el('div', 'st-karte');
+        kk.append(el('h3', null, 'Mein Konto'));
+        if (kt.ueberstunden !== null) kk.append(el('div', 'st-summe', 'Stundenkonto bis gestern: ' + vorzeichen(kt.ueberstunden) + ' Std.'));
+        if (kt.urlaubRest !== null) kk.append(el('div', 'st-summe', 'Resturlaub: ' + zahlText(kt.urlaubRest) + ' Tage'));
+        if (kt.urlaubRest !== null) kk.append(el('p', 'klein', 'Schon eingetragener Urlaub (auch später im Jahr) ist abgezogen.'));
+        if (offen.length) kk.append(el('div', 'st-hinweis', 'Noch offen: ' + offen.map(datumKurz).join(', ') + '. Beim nächsten Start fragt die App nach.'));
+        teile.push(kk);
+        // eigene Einträge ab heute, mit Streichen (außer vom Chef)
+        const heute = tagVon(new Date());
+        const kommend = abwesend.filter((x) => x.tag >= heute);
+        const g = [];
+        if (kommend.length) g.push(el('h3', null, 'Eingetragen ab heute'));
+        kommend.forEach((x) => {
+          const z = el('div', 'st-tag abwesend');
+          z.append(el('span', 'datum', datumKurz(x.tag)), el('span', 'zeit', ABWESEND[x.art]));
+          if (x.automatisch || x.angelegt_von === uid) {
+            const b = el('button', 'st-wahl', 'Streichen'); b.type = 'button';
+            b.addEventListener('click', async () => {
+              b.disabled = true;
+              const { error } = await sb.rpc('abwesenheit_selbst', { p_von: x.tag, p_bis: x.tag, p_art: null });
+              if (error) { b.disabled = false; z.append(fehlerKasten('Nicht gestrichen', error)); return; }
+              holen();
+            });
+            z.append(b);
+          } else {
+            z.append(el('span', 'klein', 'von Christian'));
+          }
+          g.push(z);
+        });
+        vorab.geplant.replaceChildren(...g);
+        teile.push(vorab.d);
+      }
 
       const monat = tagVon(new Date()).slice(0, 7);
       const imMonat = tage.filter((t) => t.tag.startsWith(monat));
       const k = el('div', 'st-karte');
       k.append(el('h3', null, 'Meine Zeiten im ' + new Date().toLocaleDateString('de-DE', { month: 'long' })));
       k.append(el('div', 'st-summe', 'Zusammen: ' + stunden(imMonat.reduce((s, t) => s + t.arbeitMs, 0))));
-      imMonat.slice().reverse().forEach((t) => k.append(tagesZeile(t, taetigkeiten[uid + '|' + t.tag])));
+      const weg = abwesend.filter((x) => x.tag.startsWith(monat) && x.tag <= tagVon(new Date()));
+      imMonat.map((t) => ({ tag: t.tag, t })).concat(weg.map((x) => ({ tag: x.tag, x })))
+        .sort((a, b) => (a.tag < b.tag ? 1 : -1)).forEach(({ t, x }) => {
+          if (t) { k.append(tagesZeile(t, taetigkeiten[uid + '|' + t.tag])); return; }
+          const z = el('div', 'st-tag abwesend');
+          z.append(el('span', 'datum', datumKurz(x.tag)), el('span', 'zeit', ABWESEND[x.art]));
+          k.append(z);
+        });
       // nur abgelehnte Nachträge; vom Chef gestrichene Fehl-Tipper sind keine Nachricht wert
       const abgelehnt = stempel.filter((s) => s.status === 'abgelehnt' && s.nachtrag);
       abgelehnt.forEach((s) => k.append(el('div', 'st-hinweis', 'Nachtrag abgelehnt: ' + ARTEN[s.art] + ' ' + wannText(s.zeit))));
-      if (!imMonat.length) k.append(el('p', 'klein', 'Noch keine Zeiten in diesem Monat.'));
-      liste.replaceChildren(k);
+      if (!imMonat.length && !weg.length) k.append(el('p', 'klein', 'Noch keine Zeiten in diesem Monat.'));
+      teile.push(k);
+      liste.replaceChildren(...teile);
     }
 
     regelmaessig(box, holen);
@@ -324,26 +555,47 @@
   // und ist beim Verlassen weg; die Regeln sind dieselben wie in der Datenbank (012_stopp_mit_taetigkeit).
   function vorschauDb() {
     const uid = 'vorschau';
-    const stempel = [], taetigkeiten = [];
+    const stempel = [], taetigkeiten = [], abwesend = [];
     let id = 0;
-    const tag = (d) => tagVon(new Date(Date.now() - d * 86400000));
     function stempelDazu(art, zeit, extra) { stempel.push(Object.assign({ id: ++id, user_id: uid, art, zeit, status: 'gueltig', nachtrag: false }, extra)); }
-    // zwei Beispieltage
-    [[2, '06:30', '17:15', 'Meißeliert'], [1, '07:00', '16:45', 'Maschinen gewaschen']].forEach(([d, von, bis, text]) => {
-      stempelDazu('start', new Date(tag(d) + 'T' + von).toISOString());
-      stempelDazu('stopp', new Date(tag(d) + 'T' + bis).toISOString());
-      taetigkeiten.push({ id: ++id, user_id: uid, tag: tag(d), text });
+    // Die letzten vier Werktage: die zwei älteren gearbeitet, die zwei jüngsten offen (dann fragt Start nach)
+    const werktage = [];
+    for (let d = tagPlus(tagVon(new Date()), -1); werktage.length < 4; d = tagPlus(d, -1)) if (wochentag(d) <= 5 && !feiertag(d)) werktage.push(d);
+    [[werktage[3], '06:30', '17:15', 'Meißeliert'], [werktage[2], '07:00', '16:45', 'Maschinen gewaschen']].forEach(([d, von, bis, text]) => {
+      stempelDazu('start', new Date(d + 'T' + von).toISOString());
+      stempelDazu('stopp', new Date(d + 'T' + bis).toISOString());
+      taetigkeiten.push({ id: ++id, user_id: uid, tag: d, text });
     });
+    const person = { user_id: uid, name: 'Vorschau', festangestellt: true, urlaub_ab: null, urlaub_tage_jahr: 30, soll_std_monat: 173, ueberstundenkonto: true };
+    const start = { user_id: uid, stichtag: tagPlus(werktage[3], -1), urlaub_rest: 18, ueberstunden: 12.5 };
     const fehler = (message) => ({ error: { message } });
     const abfrage = (zeilen) => {
-      const o = { select: () => o, eq: () => o, gte: () => o, lt: () => o, order: () => o,
-        then: (f) => Promise.resolve({ data: zeilen.slice(), error: null }).then(f) };
+      const ergebnis = () => Promise.resolve({ data: zeilen.slice(), error: null });
+      const o = { select: () => o, eq: () => o, neq: () => o, is: () => o, gte: () => o, lt: () => o, lte: () => o, order: () => o,
+        maybeSingle: () => ({ then: (f) => Promise.resolve({ data: zeilen[0] || null, error: null }).then(f) }),
+        then: (f) => ergebnis().then(f) };
       return o;
     };
+    const tabellen = () => ({ taetigkeiten, stempel, personen: [person], konto_start: [start],
+      abwesenheiten: abwesend.filter((x) => !x.storniert) });
     return {
       auth: { getUser: async () => ({ data: { user: { id: uid } } }) },
-      from: (t) => abfrage(t === 'taetigkeiten' ? taetigkeiten : stempel),
+      from: (t) => abfrage(tabellen()[t] || []),
       rpc: async (name, a) => {
+        if (name === 'abwesenheit_selbst') {
+          if (a.p_von < tagPlus(start.stichtag, 1) || a.p_von < selbstAb()) return fehler('Tage vor dem ' + datumKurz(selbstAb()) + ' kann nur Christian ändern');
+          let n = 0;
+          for (let d = a.p_von; d <= a.p_bis; d = tagPlus(d, 1)) {
+            if (wochentag(d) > 5 || feiertag(d)) continue;
+            const alt = abwesend.find((x) => x.tag === d && !x.storniert);
+            if (a.p_art === null) { if (alt) { alt.storniert = true; n++; } continue; }
+            if ((alt && alt.art === a.p_art) || stempel.some((s) => s.status !== 'abgelehnt' && tagVon(s.zeit) === d)) continue;
+            if (alt) alt.storniert = true;
+            abwesend.push({ id: ++id, user_id: uid, tag: d, art: a.p_art, automatisch: false, grund: 'vom Mitarbeiter eingetragen', angelegt_von: uid });
+            n++;
+          }
+          return { data: n, error: null };
+        }
         if (name === 'taetigkeit_speichern') {
           if (!String(a.p_text || '').trim()) return fehler('Bitte etwas eintragen');
           taetigkeiten.push({ id: ++id, user_id: uid, tag: a.p_tag, text: a.p_text.trim() });
@@ -428,7 +680,7 @@
         if (starts.length) {
           const ab = new Date(starts[0] + 'T00:00:00'); ab.setDate(ab.getDate() - 1);
           const [ks, ka] = await Promise.all([
-            window.sb.from('stempel').select('*').eq('status', 'gueltig').gte('zeit', ab.toISOString()).order('zeit'),
+            window.sb.from('stempel').select('*').neq('status', 'abgelehnt').gte('zeit', ab.toISOString()).order('zeit'),
             window.sb.from('abwesenheiten').select('user_id, tag, art').is('storniert_am', null).gte('tag', starts[0]).order('tag')
           ]);
           if (ks.error || ka.error) throw ks.error || ka.error;
@@ -514,6 +766,9 @@
           .filter((t) => t.tag.startsWith(praefix));
         const summe = tage.reduce((s, t) => s + t.arbeitMs, 0);
         const weg = abwesend.filter((x) => x.user_id === p.user_id && x.tag.startsWith(praefix));
+        // Werktage ohne Stempel und ohne Eintrag (022): Mitarbeiter wird beim nächsten Start gefragt
+        const kt = konten[p.user_id];
+        const offenIm = kt ? kt.offen.filter((t) => t.startsWith(praefix)) : [];
         const d = el('details', 'st-monat');
         d.open = offen.has(p.user_id);
         d.addEventListener('toggle', () => { if (d.open) offen.add(p.user_id); else offen.delete(p.user_id); });
@@ -521,11 +776,19 @@
         const zeile = el('div', 'zeile');
         zeile.append(el('span', 'name', p.name), el('span', 'klein', tage.length + (tage.length === 1 ? ' Tag' : ' Tage')), el('span', 'std', stunden(summe)));
         if (tage.some((t) => t.stoppFehlt)) zeile.append(el('span', 'marke', 'Stopp fehlt'));
+        if (offenIm.length) zeile.append(el('span', 'marke', offenIm.length + ' offen'));
         sum.append(zeile);
         d.append(sum);
-        // Arbeitstage und Abwesenheiten nach Datum
-        tage.map((t) => ({ tag: t.tag, t })).concat(weg.map((x) => ({ tag: x.tag, x })))
-          .sort((a, b) => (a.tag < b.tag ? -1 : 1)).forEach(({ t, x }) => {
+        // Arbeitstage, Abwesenheiten und offene Tage nach Datum
+        tage.map((t) => ({ tag: t.tag, t })).concat(weg.map((x) => ({ tag: x.tag, x })), offenIm.map((o) => ({ tag: o, o })))
+          .sort((a, b) => (a.tag < b.tag ? -1 : 1)).forEach(({ t, x, o }) => {
+            if (o) {
+              const z = el('div', 'st-tag abwesend offen');
+              z.append(el('span', 'datum', datumKurz(o)), el('span', 'zeit', 'offen – nichts eingetragen'));
+              d.append(z);
+              export_.push([p.name, o.split('-').reverse().join('.'), '', '', '', '', '', 'offen (nichts eingetragen)']);
+              return;
+            }
             if (x) {
               d.append(abwesendZeile(x));
               export_.push([p.name, x.tag.split('-').reverse().join('.'), '', '', '', '', '', ABWESEND[x.art] + (x.automatisch ? ' (automatisch)' : '')]);
@@ -569,7 +832,7 @@
       const k = el('div', 'st-karte st-formular');
       k.append(el('h3', null, 'Urlaub und Überstunden'));
       const fest = personen.filter((p) => p.festangestellt);
-      if (!fest.length) k.append(el('p', 'klein', 'Noch niemand ausgewählt. Unten ankreuzen, wer automatisch Urlaub bekommt.'));
+      if (!fest.length) k.append(el('p', 'klein', 'Noch niemand ausgewählt. Unten ankreuzen, wer festangestellt ist.'));
       fest.forEach((p) => {
         const eigene = abwesend.filter((x) => x.user_id === p.user_id);
         const urlaub = eigene.filter((x) => x.art === 'urlaub').length;
@@ -599,6 +862,7 @@
             info.push('Überstunden bis gestern: ' + vorzeichen(kt.ueberstunden) + ' Std.');
             if (kt.monatSoll) info.push('Diesen Monat bis gestern: gearbeitet ' + zahlText(kt.monatIst) + ' Std. (mit Urlaub/Krank/Feiertag), Soll ' + zahlText(kt.monatSoll) + ' Std.');
           }
+          if (kt.offen.length) info.push('Offen (nichts eingetragen, zählt als nicht gearbeitet): ' + kt.offen.map(datumKurz).join(', '));
           info.forEach((t) => d.append(el('p', 'klein', t)));
         }
         d.append(el('p', 'klein', jahr + ': ' + urlaub + (urlaub === 1 ? ' Tag' : ' Tage') + ' Urlaub' + (krank ? ', ' + krank + (krank === 1 ? ' Tag' : ' Tage') + ' krank' : '') + ' eingetragen'));
@@ -661,10 +925,10 @@
         k.append(d);
       });
 
-      // Wer bekommt automatisch Urlaub?
+      // Wer ist festangestellt (Urlaub, Konto)? Automatischer Urlaub nur ohne Überstundenkonto (022)
       const w = el('details', 'st-formular');
-      w.append(el('summary', null, 'Wer bekommt automatisch Urlaub?'));
-      w.append(el('p', 'klein', 'Für Angekreuzte trägt die App jeden Wochentag (außer Feiertagen) ohne Stempel am nächsten Morgen als Urlaub ein – ab dem Tag nach dem Ankreuzen. Minijobber nicht ankreuzen.'));
+      w.append(el('summary', null, 'Wer ist festangestellt?'));
+      w.append(el('p', 'klein', 'Angekreuzte haben Urlaub und tragen Urlaub, Frei und Krank selbst ein – ab dem Tag nach dem Ankreuzen. Mit Überstundenkonto bleibt ein Werktag ohne Stempel offen, bis der Mitarbeiter beim nächsten Start wählt (gearbeitet, frei, Urlaub, krank). Ohne Überstundenkonto (Festgehalt) trägt die App so einen Tag am nächsten Morgen als Urlaub ein. Minijobber nicht ankreuzen.'));
       personen.forEach((p) => {
         const l = el('label', 'st-haken');
         const c = el('input'); c.type = 'checkbox'; c.checked = !!p.festangestellt;
@@ -685,7 +949,8 @@
     // Eine Zeile Urlaub/Krank/Frei; mit aendern = Auswahl zum Ändern oder Streichen
     function abwesendZeile(x, aendern) {
       const z = el('div', 'st-tag abwesend');
-      z.append(el('span', 'datum', datumKurz(x.tag)), el('span', 'zeit', ABWESEND[x.art] + (x.automatisch ? ' (automatisch)' : '')));
+      z.append(el('span', 'datum', datumKurz(x.tag)), el('span', 'zeit', ABWESEND[x.art] +
+        (x.automatisch ? ' (automatisch)' : x.grund === 'vom Mitarbeiter eingetragen' ? ' (selbst eingetragen)' : '')));
       if (aendern) {
         const s = el('select');
         Object.entries(ABWESEND).concat([['', 'Streichen']]).forEach(([w, t]) => { const o = el('option', null, t); o.value = w; s.append(o); });
@@ -726,16 +991,37 @@
   // Erster gezählter Tag: Tag nach dem Startstand, sonst der Beginn des automatischen Urlaubs
   function startTag(p, start) { return start ? tagPlus(start.stichtag, 1) : p.urlaub_ab || null; }
 
+  // Frühester Tag, den ein Mitarbeiter selbst ändern darf: Monatsanfang, bis zum 5. der Vormonat
+  // (gleich wie public.abwesenheit_selbst_ab in 022_abwesenheit_selbst.sql)
+  function selbstAb() {
+    const heute = tagVon(new Date());
+    const [j, m, t] = heute.split('-').map(Number);
+    if (t > 5) return heute.slice(0, 8) + '01';
+    return m === 1 ? (j - 1) + '-12-01' : j + '-' + String(m - 1).padStart(2, '0') + '-01';
+  }
+
+  // Werktage (Mo–Fr, kein Feiertag) von–bis ohne Stempel (gültig oder wartend) und ohne Urlaub/Krank/Frei = „offen“
+  function offeneTage(von, bis, stempel, abwesend) {
+    const belegt = new Set(stempel.filter((s) => s.status !== 'abgelehnt').map((s) => tagVon(s.zeit)));
+    abwesend.forEach((x) => belegt.add(x.tag));
+    const offen = [];
+    for (let d = von; d <= bis; d = tagPlus(d, 1)) {
+      if (wochentag(d) <= 5 && !feiertag(d) && !belegt.has(d)) offen.push(d);
+    }
+    return offen;
+  }
+
   // Resturlaub und Überstundenkonto einer Person bis gestern (020_konten.sql)
   //   Tagessoll = Sollstunden pro Monat / Wochentage (Mo–Fr) des Monats
   //   Überstunden = Start + gearbeitet + Tagessoll je Urlaubs-/Krank-/Feiertag − Tagessoll je Wochentag; „Frei“ ohne Gutschrift
   //   Resturlaub = Start + Urlaubstage pro Jahr ab jedem neuen Jahr − eingetragene Urlaubstage
+  // stempel: gültige und wartende; gerechnet wird nur mit gültigen, wartende Nachträge machen einen Tag nur „nicht offen“
   function konto(p, start, stempel, abwesend) {
     const ab = startTag(p, start);
     if (!ab) return null;
     const gestern = tagPlus(tagVon(new Date()), -1);
     const arbeit = {};
-    auswerten(stempel).forEach((t) => { arbeit[t.tag] = t.arbeitMs / 3600000; });
+    auswerten(stempel.filter((s) => s.status === 'gueltig')).forEach((t) => { arbeit[t.tag] = t.arbeitMs / 3600000; });
     const weg = {};
     abwesend.forEach((x) => { weg[x.tag] = x.art; });
     const tagessoll = {};
@@ -766,7 +1052,8 @@
       for (let j = Number(ab.slice(0, 4)) + 1; j <= new Date().getFullYear(); j++) urlaubRest += Number(p.urlaub_tage_jahr);
       urlaubRest -= abwesend.filter((x) => x.art === 'urlaub' && x.tag >= ab).length;
     }
-    return { ab, start: start || null, ueberstunden: mitKonto ? ue : null, monatIst, monatSoll, urlaubRest };
+    return { ab, start: start || null, ueberstunden: mitKonto ? ue : null, monatIst, monatSoll, urlaubRest,
+      offen: offeneTage(ab, gestern, stempel, abwesend) };
   }
 
   // Konto für einen Mitarbeiter anlegen; das vorläufige Kennwort wird nur hier einmal gezeigt

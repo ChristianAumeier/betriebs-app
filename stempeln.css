@@ -121,3 +121,28 @@
 .st-haken { flex-direction: row !important; align-items: center; gap: 10px !important; font-weight: 400 !important; padding: 4px 0; }
 .st-haken input { width: 22px; height: 22px; min-height: 0; }
 .st-vorschau { display: flex; flex-direction: column; gap: 8px; background: #e8f0fb; color: #1d3c6b; }
+/* Offene Tage, Nachfrage vor dem Start (022) */
+.st-tag.abwesend.offen { color: #8a1c1c; }
+.st-frage { border-color: #f0d48a; background: #fffaf0; }
+.st-fragzeile { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 0; border-top: 1px solid #eceee8; }
+.st-fragzeile .datum { font-weight: 700; flex: 1 0 100%; }
+.st-fragzeile.alle .datum { flex: 1 0 auto; }
+.st-wahl {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex: 1;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+}
+.st-wahl.arbeit { border-color: #9fd3b3; color: #1d5a32; }
+.st-wahl.frei { border-color: #b9bdb3; }
+.st-wahl.urlaub { border-color: #9db8e0; color: #1d3c6b; }
+.st-wahl.krank { border-color: #e0a8a8; color: #8a1c1c; }
+.st-wahl:disabled { opacity: 0.5; }
+.st-tag.abwesend .st-wahl { flex: none; min-height: 0; padding: 4px 10px; font-size: 0.85rem; }
