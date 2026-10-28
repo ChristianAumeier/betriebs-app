@@ -741,9 +741,16 @@
           const heute = auswerten(eigene).find((t) => t.tag === tagVon(new Date()));
           const alt = z.art !== 'aus' && tagVon(z.seit) !== tagVon(new Date());
           const zeile = el('div', 'st-person');
+          // Heute: Beginn der Schicht und Pause zusammen, nicht nur der letzte Knopfdruck
+          let text = z.art === 'arbeitet' ? 'arbeitet seit ' + wannText(z.seit) : z.art === 'pause' ? 'Pause seit ' + wannText(z.seit) : 'nicht da';
+          if (heute && !alt) {
+            const pause = heute.pauseMs ? ' · Pause ' + stunden(heute.pauseMs).replace(' Std.', '') : '';
+            if (z.art === 'arbeitet') text = 'arbeitet seit ' + uhr(heute.beginn) + pause;
+            else if (z.art === 'pause') text = 'seit ' + uhr(heute.beginn) + ', Pause seit ' + uhr(z.seit);
+            else text = 'heute ' + uhr(heute.beginn) + ' – ' + (heute.ende ? uhr(heute.ende) : '?') + pause;
+          }
           zeile.append(el('span', 'punkt ' + (alt ? 'alt' : z.art)), el('span', 'name', p.name),
-            el('span', 'zustand', (z.art === 'arbeitet' ? 'arbeitet seit ' + wannText(z.seit) : z.art === 'pause' ? 'Pause seit ' + wannText(z.seit) : 'nicht da') +
-              (alt ? ' – Stopp vergessen?' : '')),
+            el('span', 'zustand', text + (alt ? ' – Stopp vergessen?' : '')),
             el('span', 'std', heute ? stunden(heute.arbeitMs) : ''));
           k.append(zeile);
         });
