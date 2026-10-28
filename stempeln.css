@@ -82,7 +82,7 @@
 
 .st-person { display: grid; grid-template-columns: 12px auto 1fr auto; gap: 8px; align-items: center; font-size: 0.9rem; }
 .st-person .name { font-weight: 600; }
-.st-person .zustand { color: var(--grau); font-size: 0.8rem; }
+.st-person .zustand { color: var(--grau); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .st-person .std { font-weight: 700; }
 .punkt { width: 10px; height: 10px; border-radius: 50%; background: #b9bdb3; }
 .punkt.arbeitet { background: #2fb36b; }

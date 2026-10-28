@@ -745,13 +745,14 @@
           let text = z.art === 'arbeitet' ? 'arbeitet seit ' + wannText(z.seit) : z.art === 'pause' ? 'Pause seit ' + wannText(z.seit) : 'nicht da';
           if (heute && !alt) {
             const pause = heute.pauseMs ? ' · Pause ' + stunden(heute.pauseMs).replace(' Std.', '') : '';
-            if (z.art === 'arbeitet') text = 'arbeitet seit ' + uhr(heute.beginn) + pause;
-            else if (z.art === 'pause') text = 'seit ' + uhr(heute.beginn) + ', Pause seit ' + uhr(z.seit);
-            else text = 'heute ' + uhr(heute.beginn) + ' – ' + (heute.ende ? uhr(heute.ende) : '?') + pause;
+            // kurz, damit es am Handy in eine Zeile passt
+            if (z.art === 'arbeitet') text = 'Start ' + uhr(heute.beginn) + pause;
+            else if (z.art === 'pause') text = 'Start ' + uhr(heute.beginn) + ' · Pause ' + uhr(z.seit);
+            else text = uhr(heute.beginn) + '–' + (heute.ende ? uhr(heute.ende) : '?') + pause;
           }
           zeile.append(el('span', 'punkt ' + (alt ? 'alt' : z.art)), el('span', 'name', p.name),
             el('span', 'zustand', text + (alt ? ' – Stopp vergessen?' : '')),
-            el('span', 'std', heute ? stunden(heute.arbeitMs) : ''));
+            el('span', 'std', heute ? stunden(heute.arbeitMs).replace(' Std.', ' h') : ''));
           k.append(zeile);
         });
         teile.push(k);
