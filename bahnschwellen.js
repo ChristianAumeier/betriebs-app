@@ -259,7 +259,9 @@
     const a = el('a', 'bs-zeile ' + ampel(f));
     a.href = '#bahnschwellen/' + f.id;
     const oben = el('div', 'oben');
-    oben.append(el('span', 'punkt'), el('span', 'nr', f.nr ? 'Nr. ' + f.nr : ''), el('span', 'datum', datumKurz(f.datum)), el('span', 'ort', f.ladestelle || 'Ladestelle noch offen'),
+    // Zeile knapp (Christian): „102  Do., 29.10.  Passau“ – ohne „Nr.“ und ohne Nummer vor dem Ladestellen-Namen
+    oben.append(el('span', 'punkt'), el('span', 'nr', f.nr ? String(f.nr) : ''), el('span', 'datum', datumKurz(f.datum)),
+      el('span', 'ort', f.ladestelle ? f.ladestelle.replace(/^\d+\s+/, '') : 'Ladestelle noch offen'),
       el('span', 'fahrer', f.fahrer || ''));
     const unten = el('div', 'unten');
     const teile = [];
