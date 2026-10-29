@@ -259,7 +259,7 @@
     const a = el('a', 'bs-zeile ' + ampel(f));
     a.href = '#bahnschwellen/' + f.id;
     const oben = el('div', 'oben');
-    oben.append(el('span', 'punkt'), el('span', 'datum', datumKurz(f.datum)), el('span', 'ort', f.ladestelle || 'Ladestelle noch offen'),
+    oben.append(el('span', 'punkt'), el('span', 'nr', f.nr ? 'Nr. ' + f.nr : ''), el('span', 'datum', datumKurz(f.datum)), el('span', 'ort', f.ladestelle || 'Ladestelle noch offen'),
       el('span', 'fahrer', f.fahrer || ''));
     const unten = el('div', 'unten');
     const teile = [];
@@ -343,7 +343,7 @@
     let chefTeile = null;
     let wochenKarte = null;
 
-    const suchFeld = el('input', 'bs-suche'); suchFeld.type = 'search'; suchFeld.placeholder = 'Suchen: Lieferschein-, Begleitschein- oder Auftragsnummer';
+    const suchFeld = el('input', 'bs-suche'); suchFeld.type = 'search'; suchFeld.placeholder = 'Suchen: Fuhren-Nr., Lieferschein-, Begleitschein- oder Auftragsnummer';
     suchFeld.addEventListener('input', () => { suche = suchFeld.value.trim(); holen(); });
     const ortWahl = el('select'); const fahrerWahl = el('select');
     ortWahl.addEventListener('change', () => { filterOrt = ortWahl.value; holen(); });
@@ -356,7 +356,13 @@
         const von = jahr + '-' + String(monat + 1).padStart(2, '0') + '-01';
         const bis = new Date(jahr, monat + 1, 1).toLocaleDateString('sv-SE');
         let q = window.sb.from('fuhren_liste').select('*').order('datum', { ascending: false }).order('id', { ascending: false });
-        if (suche) q = q.or(['lieferschein_nr', 'begleitschein_nr', 'auftrag_nr'].map((s) => s + '.ilike.*' + suche.replace(/[,()*]/g, '') + '*').join(','));
+        if (suche) {
+          const teile = ['lieferschein_nr', 'begleitschein_nr', 'auftrag_nr'].map((s) => s + '.ilike.*' + suche.replace(/[,()*]/g, '') + '*');
+          // Fuhren-Nummer (030): „112“ oder „Nr. 112“ findet die Fuhre 112 (jedes Jahr)
+          const nr = /^(?:nr\.?\s*)?(\d{1,5})$/i.exec(suche);
+          if (nr) teile.push('nr.eq.' + Number(nr[1]));
+          q = q.or(teile.join(','));
+        }
         else q = q.gte('datum', von).lt('datum', bis);
         const offenQ = r === 'transportfirma'
           ? window.sb.from('fuhren_liste').select('*').not('abgesendet_am', 'is', null).eq('hat_registerbeleg', false).is('storniert_am', null).order('datum')
@@ -545,7 +551,8 @@
     function zeichnen(f, belege, preise, ladestellen, wartend) {
       // Kopf mit Werten
       const k = el('div', 'bs-karte bs-kopf ' + ampel(f));
-      k.append(el('h3', null, datumKurz(f.datum) + ' · ' + (f.ladestelle || 'Ladestelle noch offen')));
+      k.append(el('h3', null, (f.nr ? 'Nr. ' + f.nr + ' · ' : '') + datumKurz(f.datum) + ' · ' + (f.ladestelle || 'Ladestelle noch offen')));
+      if (!f.nr && f.quelle === 'app') k.append(el('p', 'klein', 'Die Fuhren-Nummer kommt mit dem ersten Scan.'));
       const werte = el('dl', 'bs-werte');
       const zeile = (t, w) => { werte.append(el('dt', null, t), el('dd', null, w === null || w === undefined || w === '' ? '–' : w)); };
       zeile('Fahrer', f.fahrer);
@@ -1001,11 +1008,11 @@
 
   // ---------- Herunterladen ----------
   function csvHerunterladen(fuhren, preise, dateiname) {
-    const kopf = ['Datum', 'Ladestelle', 'Vertrag', 'Stück', 'Gewicht (t)', 'Zeit beim Abladen', 'Fahrer', 'Begleitscheinnummer', 'Auftragsnummer', 'Vergütung', 'Betrag (€)', 'Hinweis'];
+    const kopf = ['Nr.', 'Datum', 'Ladestelle', 'Vertrag', 'Stück', 'Gewicht (t)', 'Zeit beim Abladen', 'Fahrer', 'Begleitscheinnummer', 'Auftragsnummer', 'Vergütung', 'Betrag (€)', 'Hinweis'];
     const zeilen = fuhren.filter((f) => !f.storniert_am).slice().sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.id - b.id)).map((f) => {
       const p = preisFuer(preise, f);
       const b = betragFuer(preise, f);
-      return [datum(f.datum), f.ladestelle || '', f.vertrag || '', f.stueck ?? '', f.gewicht_t === null ? '' : zahl(f.gewicht_t, 2), zeit(f.abladezeit).replace('–', ''),
+      return [f.nr ?? '', datum(f.datum), f.ladestelle || '', f.vertrag || '', f.stueck ?? '', f.gewicht_t === null ? '' : zahl(f.gewicht_t, 2), zeit(f.abladezeit).replace('–', ''),
         f.fahrer || '', f.begleitschein_nr || '', f.auftrag_nr || '', p ? preisText(p) : '', b === null ? '' : zahl(b, 2), f.hinweise || ''];
     });
     const text = [kopf].concat(zeilen).map((z) => z.map((x) => '"' + String(x).replace(/"/g, '""') + '"').join(';')).join('\r\n');

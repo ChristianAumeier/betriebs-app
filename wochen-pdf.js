@@ -98,7 +98,7 @@
     let stueck = 0, tonnen = 0;
     fuhren.forEach((f, i) => {
       if (y < RAND + 30) neueSeite(false);
-      const werte = [String(i + 1), datum(f.datum), f.ladestelle || '', f.fahrer || '', zahl(f.stueck), zahl(f.gewicht_t, 2), f.begleitschein_nr || '', f.auftrag_nr || '', String((belegeJe[f.id] || []).length)];
+      const werte = [f.nr ? String(f.nr) : '–', datum(f.datum), f.ladestelle || '', f.fahrer || '', zahl(f.stueck), zahl(f.gewicht_t, 2), f.begleitschein_nr || '', f.auftrag_nr || '', String((belegeJe[f.id] || []).length)];
       let x = RAND;
       werte.forEach((w, k) => {
         let t = sauber(w);
@@ -145,7 +145,7 @@
     for (let i = 0; i < fuhren.length; i++) {
       const fu = fuhren[i];
       for (const beleg of belegeJe[fu.id] || []) {
-        const kopf = sauber('Fuhre ' + (i + 1) + ' · ' + datum(fu.datum) + ' · ' + (fu.ladestelle || '') + ' · ' + ARTEN[beleg.art]);
+        const kopf = sauber('Fuhre ' + (fu.nr ? 'Nr. ' + fu.nr : i + 1) + ' · ' + datum(fu.datum) + ' · ' + (fu.ladestelle || '') + ' · ' + ARTEN[beleg.art]);
         try {
           const d = await window.sb.storage.from('belege').download(beleg.pfad);
           if (d.error) throw d.error;

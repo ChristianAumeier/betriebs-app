@@ -92,6 +92,8 @@
 .bs-zeile:active { background: #f1f3ee; }
 .bs-zeile .oben { display: flex; gap: 8px; align-items: center; }
 .bs-zeile .datum { font-weight: 700; white-space: nowrap; }
+.bs-zeile .nr { font-weight: 700; white-space: nowrap; color: #555; font-variant-numeric: tabular-nums; }
+.bs-zeile .nr:empty { display: none; }
 .bs-zeile .ort { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-zeile .fahrer { font-size: 0.8rem; color: var(--grau); white-space: nowrap; }
 .bs-zeile .unten { font-size: 0.85rem; padding-left: 18px; }
