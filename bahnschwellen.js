@@ -490,9 +490,10 @@
     box.append(kopf, belegeBox, chefBox);
     let bearbeiten = null;
     let urls = {};
+    let geloescht = false;
 
     async function holen() {
-      if (laeuft) return;
+      if (laeuft || geloescht) return;
       laeuft = true;
       try {
         // Wartende Einträge dieser Fuhre (auch solche, die noch unter der Kennung aus dem Gerät stehen)
@@ -515,6 +516,7 @@
           r === 'chef' ? window.sb.from('ladestellen').select('*').order('name') : Promise.resolve({ data: [] })
         ]);
         if (f.error || b.error) throw f.error || b.error;
+        if (geloescht) return;
         if (!f.data) { kopf.replaceChildren(el('div', 'bs-hinweis fehler', 'Diese Fuhre gibt es nicht (mehr).')); return; }
         const fehlendeUrls = (b.data || []).filter((x) => !urls[x.pfad]).map((x) => x.pfad);
         if (fehlendeUrls.length) {
@@ -598,6 +600,10 @@
           weg.disabled = true;
           const { error } = await window.sb.rpc('fuhre_loeschen', { p_fuhre: f.id });
           if (error) { weg.disabled = false; alert('Nicht gelöscht: ' + fehlerText(error)); return; }
+          // Ab jetzt die Fuhre nicht mehr nachladen (sonst käme „gibt es nicht mehr“), direkt zur Liste
+          geloescht = true;
+          kopf.replaceChildren(el('div', 'bs-hinweis ok', 'Gelöscht.'));
+          belegeBox.replaceChildren(); chefBox.replaceChildren();
           location.replace('#bahnschwellen');
         });
         k.append(el('p', 'klein', 'Diese Fuhre hat noch keinen einzigen Scan.'), weg);
