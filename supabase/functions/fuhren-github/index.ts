@@ -2,6 +2,7 @@
 // Repository ChristianAumeier/claude-gedaechtnis, in dem eine Claude-Routine die Scans liest.
 //   aktion „weitergeben“ (von der Datenbank, Kopf x-push-ausloeser): Scans einer kompletten Fuhre als ein Commit
 //     nach eingang/fuhren/<datum>_fuhre-<id>/ legen (plus fuhre.json). Das startet die Routine.
+//     Ab auslese_runde 2 (027, Belege nachgereicht): alter Ordner und altes Ergebnis werden im selben Commit entfernt.
 //   aktion „abgleichen“ (von der Datenbank, alle 10 Minuten): Ergebnisse der Routine aus eingang/ergebnisse/
 //     fuhre-<id>.json holen und in die Fuhre übernehmen (public.fuhre_ergebnis_speichern).
 //   aktion „excel“ (aus der App, nur Chef): Monats-Auswertung aus dem Repository herunterladen.
@@ -73,23 +74,48 @@ Deno.serve(async (req: Request) => {
           eintraege.push({ path: ordner + datei, mode: "100644", type: "blob", sha: (await r.json()).sha });
           dateien.push({ art: b.art, datei });
         }
+        const runde = Number(f.auslese_runde ?? 1);
         const info = {
           fuhre_id: id, datum: f.datum, lkw: f.lkw, fahrer_in_der_app: f.fahrer,
           ladestelle_in_der_app: f.ladestellen?.name ?? null, vertrag_in_der_app: f.ladestellen?.vertrag ?? null,
           // Gesetzt, wenn Christian die Fuhre trotz fehlender Belege abgeschlossen hat (Fehlen ist dann gewollt)
           ohne_fehlende_belege_abgeschlossen: f.abschluss_grund ?? null,
           dateien, ergebnis_ablegen_unter: "eingang/ergebnisse/fuhre-" + id + ".json",
+          // Ab Runde 2: Belege wurden nachgereicht oder als falsch markiert; so stand die Fuhre bisher in App und Excel (027)
+          auslese_runde: runde,
+          bisher_ausgelesen: runde > 1 ? {
+            datum: f.datum, ladestelle: f.ladestellen?.name ?? null, vertrag: f.ladestellen?.vertrag ?? null, stueck: f.stueck,
+            begleitschein_nr: f.begleitschein_nr, auftrag_nr: f.auftrag_nr, auffaellig: f.auffaellig, hinweise: f.hinweise,
+          } : null,
         };
         const ib = await gh("/git/blobs", { method: "POST", body: JSON.stringify({ content: JSON.stringify(info, null, 2), encoding: "utf-8" }) });
         eintraege.push({ path: ordner + "fuhre.json", mode: "100644", type: "blob", sha: (await ib.json()).sha });
+
+        // Neu-Auslesen: alte Ablage dieser Fuhre (auch unter altem Datum) und altes Ergebnis im selben Commit entfernen,
+        // damit die Routine sie wieder als offen sieht und keine alten Scans mitliest
+        const weg: { path: string; mode: string; type: string; sha: null }[] = [];
+        if (runde > 1) {
+          const neuePfade = new Set(eintraege.map((e) => e.path));
+          const fr = await gh("/contents/eingang/fuhren?ref=main");
+          const ordnerListe = fr.status === 404 ? [] : await fr.json() as { name: string; path: string; type: string }[];
+          for (const o of ordnerListe.filter((x) => x.type === "dir" && x.name.endsWith("_fuhre-" + id))) {
+            const ir = await gh("/contents/" + encodeURI(o.path) + "?ref=main");
+            if (ir.status === 404) continue;
+            for (const d of await ir.json() as { path: string; type: string }[]) {
+              if (d.type === "file" && !neuePfade.has(d.path)) weg.push({ path: d.path, mode: "100644", type: "blob", sha: null });
+            }
+          }
+          const er = await gh("/contents/eingang/ergebnisse/fuhre-" + id + ".json?ref=main");
+          if (er.status !== 404) weg.push({ path: "eingang/ergebnisse/fuhre-" + id + ".json", mode: "100644", type: "blob", sha: null });
+        }
 
         // Ein Commit für die ganze Fuhre; bei gleichzeitigem Push einmal neu versuchen
         for (let versuch = 0; versuch < 3; versuch++) {
           const ref = await (await gh("/git/ref/heads/main")).json();
           const basis = await (await gh("/git/commits/" + ref.object.sha)).json();
-          const baum = await (await gh("/git/trees", { method: "POST", body: JSON.stringify({ base_tree: basis.tree.sha, tree: eintraege }) })).json();
+          const baum = await (await gh("/git/trees", { method: "POST", body: JSON.stringify({ base_tree: basis.tree.sha, tree: [...eintraege, ...weg] }) })).json();
           const commit = await (await gh("/git/commits", { method: "POST", body: JSON.stringify({
-            message: "Fuhre " + id + " vom " + f.datum + " zum Auslesen", tree: baum.sha, parents: [ref.object.sha],
+            message: "Fuhre " + id + " vom " + f.datum + (runde > 1 ? " neu zum Auslesen (Runde " + runde + ")" : " zum Auslesen"), tree: baum.sha, parents: [ref.object.sha],
           }) })).json();
           const r = await fetch(API + "/git/refs/heads/main", {
             method: "PATCH",

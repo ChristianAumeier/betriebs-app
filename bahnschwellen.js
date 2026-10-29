@@ -563,7 +563,11 @@
       const stand = [];
       if (f.quelle === 'altbestand') stand.push('Aus der Excel-Auswertung übernommen.');
       if (f.abgesendet_am) stand.push('An die Transportfirma gesendet ' + wann(f.abgesendet_am) + '.');
-      if (f.ausgelesen_am) stand.push('Von Claude ausgelesen ' + wann(f.ausgelesen_am) + '.');
+      // Neu auslesen (027): vorgemerkt, oder neu weitergegeben und noch kein neues Ergebnis
+      const neuAuslesen = f.quelle === 'app' && !f.storniert_am && (f.neu_auslesen_ab ||
+        (f.ausgelesen_am && (!f.weitergegeben_am || new Date(f.weitergegeben_am) > new Date(f.ausgelesen_am))));
+      if (neuAuslesen) stand.push('Belege nachgereicht: Claude liest die Fuhre in den nächsten Minuten neu aus und schreibt den Hinweis neu.');
+      else if (f.ausgelesen_am) stand.push('Von Claude ausgelesen ' + wann(f.ausgelesen_am) + (f.auslese_runde > 1 ? ' (neu ausgelesen)' : '') + '.');
       else if (f.weitergegeben_am) stand.push('Liegt bei Claude zum Auslesen (seit ' + wann(f.weitergegeben_am) + ').');
       k.append(el('p', 'klein', stand.join(' ')));
       if (f.hinweise || f.auffaellig) {
