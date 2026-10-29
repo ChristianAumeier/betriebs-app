@@ -590,6 +590,18 @@
         d.append(fo);
         k.append(d);
       }
+      // Chef: versehentlich angelegte leere Fuhre ganz löschen (026); alles mit Scans wird storniert
+      if (r === 'chef' && f.quelle === 'app' && !belege.length && !wartend.length && !f.abgesendet_am && !f.weitergegeben_am && !f.ausgelesen_am) {
+        const weg = el('button', 'bs-knopf leise rot', 'Leere Fuhre löschen'); weg.type = 'button';
+        weg.addEventListener('click', async () => {
+          if (!confirm('Diese leere Fuhre vom ' + datum(f.datum) + (f.fahrer ? ' (' + f.fahrer + ')' : '') + ' wirklich löschen? Das lässt sich nicht rückgängig machen.')) return;
+          weg.disabled = true;
+          const { error } = await window.sb.rpc('fuhre_loeschen', { p_fuhre: f.id });
+          if (error) { weg.disabled = false; alert('Nicht gelöscht: ' + fehlerText(error)); return; }
+          location.replace('#bahnschwellen');
+        });
+        k.append(el('p', 'klein', 'Diese Fuhre hat noch keinen einzigen Scan.'), weg);
+      }
       kopf.replaceChildren(k);
 
       belegeBox.replaceChildren(scanBereich(f, belege, wartend));

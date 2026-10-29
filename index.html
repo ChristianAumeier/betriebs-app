@@ -107,11 +107,11 @@
 </head>
 <body>
   <header>
-    <button id="zurueck" aria-label="Zurück zur Startseite">←</button>
+    <button id="zurueck" aria-label="Zurück">←</button>
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v36</footer>
+  <footer>v37</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
@@ -165,7 +165,11 @@
     const inhalt = document.getElementById('inhalt');
     const titel = document.getElementById('titel');
     const zurueck = document.getElementById('zurueck');
-    zurueck.addEventListener('click', () => { location.hash = ''; });
+    // Zurück geht einen Schritt: aus einer Unterseite (z. B. „#bahnschwellen/123“) in den Bereich, sonst zur Startseite
+    zurueck.addEventListener('click', () => {
+      const [id, rest] = location.hash.slice(1).split('/');
+      location.hash = rest ? id : '';
+    });
 
     function zeigeStartseite() {
       titel.textContent = 'Betrieb Aumeier';
