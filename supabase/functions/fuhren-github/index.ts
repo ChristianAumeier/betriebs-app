@@ -75,6 +75,8 @@ Deno.serve(async (req: Request) => {
           dateien.push({ art: b.art, datei });
         }
         const runde = Number(f.auslese_runde ?? 1);
+        // Einzelne Meldungen (029): offene und vom Chef erledigte (die soll die Routine nicht wieder melden)
+        const { data: meld } = await sb.from("fuhre_hinweise").select("text, erledigt_am").eq("fuhre_id", id).is("ersetzt_am", null).order("id");
         const info = {
           fuhre_id: id, datum: f.datum, lkw: f.lkw, fahrer_in_der_app: f.fahrer,
           ladestelle_in_der_app: f.ladestellen?.name ?? null, vertrag_in_der_app: f.ladestellen?.vertrag ?? null,
@@ -85,8 +87,10 @@ Deno.serve(async (req: Request) => {
           auslese_runde: runde,
           bisher_ausgelesen: runde > 1 ? {
             datum: f.datum, ladestelle: f.ladestellen?.name ?? null, vertrag: f.ladestellen?.vertrag ?? null, stueck: f.stueck,
-            begleitschein_nr: f.begleitschein_nr, auftrag_nr: f.auftrag_nr, auffaellig: f.auffaellig, hinweise: f.hinweise,
+            begleitschein_nr: f.begleitschein_nr, auftrag_nr: f.auftrag_nr, auffaellig: f.auffaellig,
+            offene_meldungen: (meld ?? []).filter((m) => !m.erledigt_am).map((m) => m.text),
           } : null,
+          vom_chef_erledigt: (meld ?? []).filter((m) => m.erledigt_am).map((m) => m.text),
         };
         const ib = await gh("/git/blobs", { method: "POST", body: JSON.stringify({ content: JSON.stringify(info, null, 2), encoding: "utf-8" }) });
         eintraege.push({ path: ordner + "fuhre.json", mode: "100644", type: "blob", sha: (await ib.json()).sha });

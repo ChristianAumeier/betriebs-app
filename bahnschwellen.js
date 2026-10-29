@@ -277,7 +277,7 @@
         if (f.abgeschlossen_am) marken.append(el('span', 'marke', 'abgeschlossen'));
         if (f.ausgelesen_am) marken.append(el('span', 'marke ok', 'ausgelesen'));
       }
-      if (f.auffaellig) marken.append(el('span', 'marke rot', 'prüfen'));
+      if (f.auffaellig) marken.append(el('span', 'marke rot', f.offene_hinweise > 1 ? f.offene_hinweise + ' Meldungen' : 'prüfen'));
     }
     a.append(oben, unten, marken);
     return a;
@@ -491,6 +491,7 @@
     let bearbeiten = null;
     let urls = {};
     let geloescht = false;
+    let meldungen = []; // einzelne Meldungen der Fuhre (029), ohne die durch Neu-Auslesen ersetzten
 
     async function holen() {
       if (laeuft || geloescht) return;
@@ -509,13 +510,15 @@
           zeichnenLokal(wartend);
           return;
         }
-        const [f, b, p, l] = await Promise.all([
+        const [f, b, p, l, h] = await Promise.all([
           window.sb.from('fuhren_liste').select('*').eq('id', id).maybeSingle(),
           window.sb.from('belege').select('*').eq('fuhre_id', id).order('id'),
           preiseLaden(),
-          r === 'chef' ? window.sb.from('ladestellen').select('*').order('name') : Promise.resolve({ data: [] })
+          r === 'chef' ? window.sb.from('ladestellen').select('*').order('name') : Promise.resolve({ data: [] }),
+          window.sb.from('fuhre_hinweise').select('*').eq('fuhre_id', id).is('ersetzt_am', null).order('id')
         ]);
-        if (f.error || b.error) throw f.error || b.error;
+        if (f.error || b.error || h.error) throw f.error || b.error || h.error;
+        meldungen = h.data || [];
         if (geloescht) return;
         if (!f.data) { kopf.replaceChildren(el('div', 'bs-hinweis fehler', 'Diese Fuhre gibt es nicht (mehr).')); return; }
         const fehlendeUrls = (b.data || []).filter((x) => !urls[x.pfad]).map((x) => x.pfad);
@@ -566,32 +569,48 @@
       // Neu auslesen (027): vorgemerkt, oder neu weitergegeben und noch kein neues Ergebnis
       const neuAuslesen = f.quelle === 'app' && !f.storniert_am && (f.neu_auslesen_ab ||
         (f.ausgelesen_am && (!f.weitergegeben_am || new Date(f.weitergegeben_am) > new Date(f.ausgelesen_am))));
-      if (neuAuslesen) stand.push('Belege nachgereicht: Claude liest die Fuhre in den nächsten Minuten neu aus und schreibt den Hinweis neu.');
+      if (neuAuslesen) stand.push('Belege nachgereicht: Claude liest die Fuhre in den nächsten Minuten neu aus und schreibt die Meldungen neu.');
       else if (f.ausgelesen_am) stand.push('Von Claude ausgelesen ' + wann(f.ausgelesen_am) + (f.auslese_runde > 1 ? ' (neu ausgelesen)' : '') + '.');
       else if (f.weitergegeben_am) stand.push('Liegt bei Claude zum Auslesen (seit ' + wann(f.weitergegeben_am) + ').');
       k.append(el('p', 'klein', stand.join(' ')));
-      if (f.hinweise || f.auffaellig) {
-        const h = el('div', 'bs-hinweis' + (f.auffaellig ? ' fehler' : ''), f.hinweise || 'Beim Auslesen als auffällig markiert.');
-        // Was kam nach dem Auslesen noch dazu? (Der Hinweis selbst wird nicht neu geschrieben)
-        if (f.auffaellig && f.ausgelesen_am) {
+      // Meldungen einzeln (029): jede offene Meldung rot mit eigenem „Erledigt“; grün, wenn keine mehr offen ist
+      const offen = meldungen.filter((m) => !m.erledigt_am);
+      const erledigt = meldungen.filter((m) => m.erledigt_am);
+      if (offen.length) {
+        const liste = el('div', 'bs-meldungen');
+        // Was kam nach dem Auslesen noch dazu? (wird beim Neu-Auslesen berücksichtigt)
+        if (f.ausgelesen_am) {
           const spaeter = belege.filter((b) => !b.ungueltig_am && new Date(b.angelegt_am) > new Date(f.ausgelesen_am));
-          if (spaeter.length) h.append(el('div', 'bs-nachgereicht', 'Seit dem Auslesen nachgereicht: ' +
+          if (spaeter.length) liste.append(el('div', 'bs-nachgereicht', 'Seit dem Auslesen nachgereicht: ' +
             [...new Set(spaeter.map((b) => ARTEN[b.art]))].join(', ') + ' (' + wann(spaeter[spaeter.length - 1].angelegt_am) + ').'));
         }
-        // Chef: Hinweis ist erledigt → grün (gleich wie Haken „geprüft, alles in Ordnung“ unter „Werte berichtigen“)
-        if (f.auffaellig && r === 'chef' && !f.storniert_am) {
-          const ok = el('button', 'bs-knopf mini', 'Erledigt – auf Grün setzen'); ok.type = 'button';
-          ok.addEventListener('click', async () => {
-            if (!confirm('Ist alles aus dem Hinweis erledigt? Die Fuhre wird dann grün. Der Hinweistext bleibt stehen.')) return;
-            ok.disabled = true;
-            const { error } = await window.sb.rpc('fuhre_aendern', { p_fuhre: f.id, p_werte: { auffaellig: false } });
-            if (error) { ok.disabled = false; alert('Hat nicht geklappt: ' + fehlerText(error)); return; }
-            bearbeiten = null; // Formular „Werte berichtigen“ neu bauen, sonst stünde dort noch der alte Haken
-            holen();
-          });
-          h.append(ok);
-        }
-        k.append(h);
+        offen.forEach((m, i) => {
+          const z = el('div', 'bs-hinweis fehler bs-meldung');
+          z.append(el('span', 'text', (offen.length > 1 ? (i + 1) + '. ' : '') + m.text));
+          if (r === 'chef' && !f.storniert_am) {
+            const ok = el('button', 'bs-knopf mini', 'Erledigt'); ok.type = 'button';
+            ok.addEventListener('click', async () => {
+              if (!confirm('Diese Meldung als erledigt abhaken?\n\n' + m.text)) return;
+              ok.disabled = true;
+              const { error } = await window.sb.rpc('fuhre_hinweis_erledigt', { p_hinweis: m.id });
+              if (error) { ok.disabled = false; alert('Hat nicht geklappt: ' + fehlerText(error)); return; }
+              holen();
+            });
+            z.append(ok);
+          }
+          liste.append(z);
+        });
+        k.append(liste);
+      } else if (f.auffaellig) {
+        k.append(el('div', 'bs-hinweis fehler', f.hinweise || 'Beim Auslesen als auffällig markiert.'));
+      } else if (f.hinweise && !erledigt.length) {
+        k.append(el('div', 'bs-hinweis', f.hinweise)); // ältere Info-Texte (vor 029)
+      }
+      if (erledigt.length) {
+        const d = el('details', 'bs-erledigt');
+        d.append(el('summary', null, erledigt.length + (erledigt.length === 1 ? ' erledigte Meldung' : ' erledigte Meldungen')));
+        erledigt.forEach((m) => d.append(el('div', 'bs-meldung erledigt', '✓ ' + m.text + ' (erledigt ' + wann(m.erledigt_am) + (m.erledigt_von ? ', ' + m.erledigt_von : '') + ')')));
+        k.append(d);
       }
       if (f.weitergabe_fehler) k.append(el('div', 'bs-hinweis fehler', 'Weitergabe an Claude hat nicht geklappt: ' + f.weitergabe_fehler));
       if (f.storniert_am) k.append(el('div', 'bs-hinweis fehler', 'Storniert ' + wann(f.storniert_am) + ': ' + (f.storno_grund || '')));
@@ -798,16 +817,14 @@
     feld('begleitschein_nr', 'Begleitschein-Nr.', 'text', f.begleitschein_nr);
     feld('auftrag_nr', 'Auftrags-Nr.', 'text', f.auftrag_nr);
     feld('lieferschein_nr', 'Lieferschein-Nr.', 'text', f.lieferschein_nr);
-    feld('hinweise', 'Hinweis', 'text', f.hinweise);
-    const ok = el('label', 'bs-haken'); const okBox = el('input'); okBox.type = 'checkbox'; okBox.checked = !f.auffaellig;
-    ok.append(okBox, document.createTextNode(' geprüft, alles in Ordnung')); form.append(ok);
+    // Hinweis und „geprüft, alles in Ordnung“ gibt es hier nicht mehr: Meldungen werden einzeln abgehakt (029)
     const speichern = el('button', 'bs-knopf', 'Speichern'); speichern.type = 'submit';
     const meldung = el('div');
     form.append(speichern, meldung);
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       speichern.disabled = true;
-      const w = { ladestelle_id: ort.value ? Number(ort.value) : null, auffaellig: !okBox.checked };
+      const w = { ladestelle_id: ort.value ? Number(ort.value) : null };
       Object.entries(felder).forEach(([n, i]) => { w[n] = i.value === '' ? null : i.type === 'number' ? Number(i.value) : i.value; });
       if (w.datum === null) delete w.datum;
       const { error } = await window.sb.rpc('fuhre_aendern', { p_fuhre: f.id, p_werte: w });
