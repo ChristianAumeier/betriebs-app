@@ -566,7 +566,29 @@
       if (f.ausgelesen_am) stand.push('Von Claude ausgelesen ' + wann(f.ausgelesen_am) + '.');
       else if (f.weitergegeben_am) stand.push('Liegt bei Claude zum Auslesen (seit ' + wann(f.weitergegeben_am) + ').');
       k.append(el('p', 'klein', stand.join(' ')));
-      if (f.hinweise) k.append(el('div', 'bs-hinweis' + (f.auffaellig ? ' fehler' : ''), f.hinweise));
+      if (f.hinweise || f.auffaellig) {
+        const h = el('div', 'bs-hinweis' + (f.auffaellig ? ' fehler' : ''), f.hinweise || 'Beim Auslesen als auffällig markiert.');
+        // Was kam nach dem Auslesen noch dazu? (Der Hinweis selbst wird nicht neu geschrieben)
+        if (f.auffaellig && f.ausgelesen_am) {
+          const spaeter = belege.filter((b) => !b.ungueltig_am && new Date(b.angelegt_am) > new Date(f.ausgelesen_am));
+          if (spaeter.length) h.append(el('div', 'bs-nachgereicht', 'Seit dem Auslesen nachgereicht: ' +
+            [...new Set(spaeter.map((b) => ARTEN[b.art]))].join(', ') + ' (' + wann(spaeter[spaeter.length - 1].angelegt_am) + ').'));
+        }
+        // Chef: Hinweis ist erledigt → grün (gleich wie Haken „geprüft, alles in Ordnung“ unter „Werte berichtigen“)
+        if (f.auffaellig && r === 'chef' && !f.storniert_am) {
+          const ok = el('button', 'bs-knopf mini', 'Erledigt – auf Grün setzen'); ok.type = 'button';
+          ok.addEventListener('click', async () => {
+            if (!confirm('Ist alles aus dem Hinweis erledigt? Die Fuhre wird dann grün. Der Hinweistext bleibt stehen.')) return;
+            ok.disabled = true;
+            const { error } = await window.sb.rpc('fuhre_aendern', { p_fuhre: f.id, p_werte: { auffaellig: false } });
+            if (error) { ok.disabled = false; alert('Hat nicht geklappt: ' + fehlerText(error)); return; }
+            bearbeiten = null; // Formular „Werte berichtigen“ neu bauen, sonst stünde dort noch der alte Haken
+            holen();
+          });
+          h.append(ok);
+        }
+        k.append(h);
+      }
       if (f.weitergabe_fehler) k.append(el('div', 'bs-hinweis fehler', 'Weitergabe an Claude hat nicht geklappt: ' + f.weitergabe_fehler));
       if (f.storniert_am) k.append(el('div', 'bs-hinweis fehler', 'Storniert ' + wann(f.storniert_am) + ': ' + (f.storno_grund || '')));
       if (f.abgeschlossen_am) k.append(el('div', 'bs-hinweis ok', 'Abgeschlossen ohne fehlende Belege (' + wann(f.abgeschlossen_am) + '): ' + (f.abschluss_grund || '')));
