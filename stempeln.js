@@ -1,6 +1,7 @@
 // Bereich „Stempeln“: Arbeitszeiten der Mitarbeiter (supabase/010_stempeln.sql).
 // Mitarbeiter: Start, Pause, Weiter, Stopp; vergessene Zeiten nachtragen (wartet auf Freigabe);
-// kurz eintragen, was am Tag gemacht wurde (supabase/011_taetigkeiten.sql).
+// kurz eintragen, was am Tag gemacht wurde (supabase/011_taetigkeiten.sql): schon während der Schicht
+// jederzeit speichern und ergänzen, beim Stopp nochmal prüfen.
 // Chef (Christian, Carolin): wer gerade arbeitet, Nachträge freigeben, Stunden je Monat, Liste fürs Lohnbüro,
 // Konten für Mitarbeiter anlegen (Edge Function konto-anlegen).
 // Stempel werden nie gelöscht oder geändert; die Zeit beim Knopfdruck setzt der Server.
@@ -200,6 +201,7 @@
     let spaeter = false;        // „Später“ gewählt: einmal ohne Nachfrage starten
     let arbeit = null;          // offenes Formular „Gearbeitet“ { tag, f }
     const fragMeldung = el('div');
+    const tagesfeld = tagFormular();
     const stopp = stoppFormular();
     const vorab = vorabFormular();
     box.append(oben, nachtragFormular(null, () => holen(), sb), liste);
@@ -306,33 +308,96 @@
       return { d, geplant };
     }
 
+    // Frage nach der Tätigkeit; bei einer Schicht von gestern (Stopp vergessen) mit Datum
+    function frageText() {
+      return !schichtTag || schichtTag === tagVon(new Date()) ? 'Was hast du heute gemacht?' : 'Was hast du am ' + datumKurz(schichtTag) + ' gemacht?';
+    }
+    function gespeicherteTaetigkeit() { return (schichtTag && taetigkeiten[uid + '|' + schichtTag]) || ''; }
+
+    // Während der Schicht: Tätigkeit schon tagsüber eintragen und ergänzen (Christian, 05.11.2026).
+    // Einmal gebaut, damit der Text das minütliche Neuladen übersteht.
+    function tagFormular() {
+      const f = el('form', 'st-karte st-formular');
+      const frage = el('span', null, 'Was hast du heute gemacht?');
+      const text = el('textarea'); text.rows = 3; text.maxLength = 500; text.required = true;
+      text.placeholder = 'z. B. meißeliert, Maschinen gewaschen, Feldarbeiten';
+      const l = el('label'); l.append(frage, text);
+      const ok = el('button', null, 'Speichern'); ok.type = 'submit';
+      const meldung = el('div');
+      f.append(l, el('p', 'klein', 'Am besten gleich nach jeder Arbeit eintragen und über den Tag ergänzen. Beim Stopp kannst du es nochmal prüfen.'), ok, meldung);
+      let geaendert = false;    // Text geändert, aber noch nicht gespeichert
+      text.addEventListener('input', () => { geaendert = true; meldung.replaceChildren(); });
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        meldung.replaceChildren();
+        if (!text.value.trim()) { meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Bitte etwas eintragen.')); return; }
+        if (text.value.trim() === gespeicherteTaetigkeit()) {
+          geaendert = false; text.blur();
+          meldung.replaceChildren(el('div', 'st-hinweis ok', 'Ist schon so gespeichert.'));
+          return;
+        }
+        ok.disabled = true;
+        const t = await sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
+        ok.disabled = false;
+        if (t.error) { meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+        geaendert = false; text.blur();
+        meldung.replaceChildren(el('div', 'st-hinweis ok', 'Gespeichert um ' + uhr(new Date()) + ' Uhr.'));
+        holen();
+      });
+      // Stand aus der Datenbank übernehmen, außer es wird gerade etwas geändert
+      function auffrischen() {
+        frage.textContent = frageText();
+        if (!geaendert) text.value = gespeicherteTaetigkeit();
+      }
+      function leeren() { geaendert = false; text.value = ''; meldung.replaceChildren(); }
+      return { f, text, auffrischen, leeren };
+    }
+
+    // Beim Stopp: Tätigkeit prüfen und ergänzen (vorausgefüllt mit dem, was schon tagsüber eingetragen ist).
     // Einmal gebaut, damit der Text das minütliche Neuladen übersteht
     function stoppFormular() {
       const f = el('form', 'st st-formular');
+      const frage = el('span', null, 'Was hast du heute gemacht?');
       const text = el('textarea'); text.rows = 3; text.maxLength = 500; text.required = true;
       text.placeholder = 'z. B. meißeliert, Maschinen gewaschen, Feldarbeiten';
-      const l = el('label', null, 'Was hast du heute gemacht?'); l.append(text);
+      const l = el('label'); l.append(frage, text);
+      const tipp = el('p', 'klein', 'Stimmt das so? Fehlt noch etwas, einfach dazuschreiben.');
       const knoepfe = el('div', 'st-knoepfe klein');
       const ok = el('button', 'st-knopf stopp', 'Speichern und Stopp'); ok.type = 'submit';
       const zurueck = el('button', 'st-knopf leise', 'Abbrechen'); zurueck.type = 'button';
       knoepfe.append(zurueck, ok);
       const meldung = el('div');
-      f.append(l, knoepfe, meldung);
-      zurueck.addEventListener('click', () => { stoppFragen = false; meldung.replaceChildren(); holen(); });
+      f.append(l, tipp, knoepfe, meldung);
+      zurueck.addEventListener('click', () => {
+        // Geänderter Text bleibt im Feld während der Schicht stehen
+        tagesfeld.text.value = text.value;
+        if (text.value.trim() !== gespeicherteTaetigkeit()) tagesfeld.text.dispatchEvent(new Event('input'));
+        stoppFragen = false; meldung.replaceChildren(); holen();
+      });
       f.addEventListener('submit', async (ev) => {
         ev.preventDefault();
         ok.disabled = true;
         meldung.replaceChildren();
-        const t = await sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
-        if (t.error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+        if (text.value.trim() !== gespeicherteTaetigkeit()) {
+          const t = await sb.rpc('taetigkeit_speichern', { p_tag: schichtTag || tagVon(new Date()), p_text: text.value });
+          if (t.error) { ok.disabled = false; meldung.replaceChildren(fehlerKasten('Nicht gespeichert', t.error)); return; }
+        }
         const { error } = await sb.rpc('stempeln', { p_art: 'stopp' });
         ok.disabled = false;
         if (error) { meldung.replaceChildren(fehlerKasten('Stopp hat nicht geklappt', error)); return; }
         stoppFragen = false;
         text.value = '';
+        tagesfeld.leeren();
         holen();
       });
-      return { f, text };
+      // Beim Öffnen: was tagsüber im Feld steht (auch noch nicht Gespeichertes)
+      function oeffnen() {
+        frage.textContent = frageText();
+        text.value = tagesfeld.text.value.trim() ? tagesfeld.text.value : gespeicherteTaetigkeit();
+        tipp.style.display = text.value.trim() ? '' : 'none';
+        meldung.replaceChildren();
+      }
+      return { f, text, oeffnen };
     }
 
     async function holen() {
@@ -380,11 +445,12 @@
       // Pause gerade erst begonnen: nachfragen, ob sie wirklich schon zu Ende ist
       if (art === 'weiter' && pauseSeit && Date.now() - new Date(pauseSeit).getTime() < 60000 &&
           !confirm('Die Pause läuft erst seit wenigen Sekunden. Pause wirklich schon beenden?')) return;
-      // Stopp: erst fragen, was gemacht wurde (außer es steht schon da)
-      if (art === 'stopp' && !taetigkeiten[uid + '|' + schichtTag]) {
+      // Stopp: erst eintragen bzw. prüfen, was gemacht wurde (vorausgefüllt mit dem schon Eingetragenen)
+      if (art === 'stopp') {
         stoppFragen = true;
+        stopp.oeffnen();
         await holen();
-        stopp.text.focus();
+        if (!stopp.text.value.trim()) stopp.text.focus();
         return;
       }
       gesperrt = true;
@@ -404,12 +470,21 @@
       const heute = tage.find((t) => t.tag === tagVon(new Date()));
       const starts = stempel.filter((x) => x.art === 'start' && x.status !== 'abgelehnt');
       schichtTag = z.art !== 'aus' && starts.length ? tagVon(starts[starts.length - 1].zeit) : null;
-      if (z.art === 'aus') stoppFragen = false;
+      if (z.art === 'aus') { stoppFragen = false; tagesfeld.leeren(); }
       pauseSeit = z.art === 'pause' ? z.seit : null;
       const kt = person ? konto(person, start, stempel, abwesend) : null;
       const frueh = selbstAb();
       offen = kt ? kt.offen.filter((t) => t >= frueh) : [];
       if (z.art !== 'aus') fragen = false;
+      tagesfeld.auffrischen();
+
+      // Tippt jemand gerade im Feld „Was hast du heute gemacht?“, oben nicht neu zeichnen
+      // (sonst schließt am Handy die Tastatur); beim nächsten Laden wird es nachgeholt
+      const aktiv = document.activeElement;
+      if (aktiv && aktiv.tagName === 'TEXTAREA' && oben.contains(aktiv)) {
+        zeichnenListe(stempel, tage, kt);
+        return;
+      }
 
       // fragen bleibt nach dem letzten geklärten Tag stehen, bis weiterNachFrage() einstempelt
       if (fragen && offen.length) {
@@ -435,10 +510,10 @@
           knoepfe.append(k);
         });
         karte.append(knoepfe);
-        const schon = schichtTag && taetigkeiten[uid + '|' + schichtTag];
-        if (schon) karte.append(el('div', 'klein', 'Heute gemacht: ' + schon));
       }
       const teile = [karte];
+      // Während der Schicht: Feld für die Tätigkeit, jederzeit speichern und ergänzen
+      if (z.art !== 'aus' && !stoppFragen) teile.push(tagesfeld.f);
       if (z.art !== 'aus' && tagVon(z.seit) !== tagVon(new Date())) {
         teile.push(el('div', 'st-hinweis', 'Du bist seit ' + wannText(z.seit) + ' eingestempelt. Stopp vergessen? Dann unten den Stopp nachtragen.'));
       }
