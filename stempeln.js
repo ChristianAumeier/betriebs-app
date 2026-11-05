@@ -713,6 +713,113 @@
     window.scrollTo(0, 0);
   }
 
+  // ---------- Chef: Tätigkeiten je Tag ----------
+  // Knopf „Tätigkeiten“ (Christian, 05.11.2026): alle Mitarbeiter mit dem, was sie an einem Tag gemacht haben;
+  // oben Datumsleiste, mit den Pfeilen tageweise zurück und vor. Eigene Unterseite #stempeln/taetigkeiten.
+  function zeigeTaetigkeiten(ziel) {
+    const box = el('div', 'st');
+    const leiste = el('div', 'st-karte st-datumsleiste');
+    const zur = el('button', 'st-pfeil', '‹'); zur.setAttribute('aria-label', 'Einen Tag zurück');
+    const vor = el('button', 'st-pfeil', '›'); vor.setAttribute('aria-label', 'Einen Tag vor');
+    const mitte = el('div', 'mitte');
+    const datum = el('h3');
+    const unter = el('div', 'klein');
+    const heuteKnopf = el('button', 'st-wahl', 'Zu heute');
+    mitte.append(datum, unter, heuteKnopf);
+    leiste.append(zur, mitte, vor);
+    const liste = el('div', 'st');
+    box.append(leiste, liste);
+    ziel.replaceChildren(box);
+    let tag = tagVon(new Date());
+    let stand = 0; // beim schnellen Blättern zählt nur die letzte Antwort
+
+    function blaettern(neu) {
+      if (neu > tagVon(new Date())) return;
+      tag = neu;
+      liste.replaceChildren(el('p', 'klein', 'Lädt …'));
+      holen();
+    }
+    zur.addEventListener('click', () => blaettern(tagPlus(tag, -1)));
+    vor.addEventListener('click', () => blaettern(tagPlus(tag, 1)));
+    heuteKnopf.addEventListener('click', () => blaettern(tagVon(new Date())));
+
+    function kopf() {
+      const heute = tagVon(new Date());
+      const [j, m, t] = tag.split('-').map(Number);
+      datum.textContent = new Date(j, m - 1, t).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+      const zusatz = [];
+      if (tag === heute) zusatz.push('heute');
+      else if (tag === tagPlus(heute, -1)) zusatz.push('gestern');
+      if (feiertag(tag)) zusatz.push('Feiertag');
+      unter.textContent = zusatz.join(' · ');
+      unter.style.display = zusatz.length ? '' : 'none';
+      vor.disabled = tag >= heute;
+      heuteKnopf.style.display = tag < tagPlus(heute, -1) ? '' : 'none';
+    }
+
+    async function holen() {
+      const nr = ++stand;
+      const fuer = tag;
+      kopf();
+      try {
+        // Schichten zählen zum Tag ihres Beginns: Stempel vom Vortag bis zum Folgetag laden
+        const von = new Date(tagPlus(fuer, -1) + 'T00:00:00');
+        const bis = new Date(tagPlus(fuer, 2) + 'T00:00:00');
+        const [p, s, t, a] = await Promise.all([
+          window.sb.from('personen').select('user_id, name, stempelt').order('name'),
+          window.sb.from('stempel').select('*').neq('status', 'abgelehnt').gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit'),
+          window.sb.from('taetigkeiten').select('id, user_id, tag, text').eq('tag', fuer).order('id'),
+          window.sb.from('abwesenheiten').select('user_id, tag, art').eq('tag', fuer).is('storniert_am', null)
+        ]);
+        const fehler = p.error || s.error || t.error || a.error;
+        if (fehler) throw fehler;
+        if (nr !== stand || !box.isConnected) return;
+        zeichnen(p.data || [], s.data || [], taetigkeitenNach(t.data || []), a.data || [], fuer);
+      } catch (e) {
+        if (nr === stand) liste.replaceChildren(fehlerKasten('Tätigkeiten konnten nicht geladen werden', e));
+      }
+    }
+
+    function zeichnen(personen, stempel, taetigkeiten, abwesend, fuer) {
+      const hat = (uid) => stempel.some((x) => x.user_id === uid && tagVon(x.zeit) === fuer) ||
+        taetigkeiten[uid + '|' + fuer] || abwesend.some((x) => x.user_id === uid);
+      // alle, die stempeln, und wer an dem Tag sonst etwas hat
+      const wer = personen.filter((x) => x.stempelt || hat(x.user_id));
+      const k = el('div', 'st-karte');
+      if (!wer.length) k.append(el('p', 'klein', 'Noch keine Mitarbeiter angelegt.'));
+      wer.forEach((x) => {
+        const z = el('div', 'st-taetigkeit');
+        const eigene = stempel.filter((s) => s.user_id === x.user_id);
+        const t = auswerten(eigene.filter((s) => s.status === 'gueltig')).find((y) => y.tag === fuer);
+        const weg = abwesend.find((y) => y.user_id === x.user_id);
+        const wartet = eigene.some((s) => s.status === 'offen' && tagVon(s.zeit) === fuer);
+        let zeit = '';
+        if (t) {
+          zeit = t.laeuft ? 'seit ' + uhr(t.beginn) : uhr(t.beginn) + '–' + (t.ende ? uhr(t.ende) : '?');
+          zeit += ' · ' + stunden(t.arbeitMs).replace(' Std.', ' h');
+        } else if (weg) {
+          zeit = ABWESEND[weg.art];
+        } else {
+          zeit = 'nicht gestempelt';
+        }
+        const zeile = el('div', 'zeile');
+        zeile.append(el('span', 'name', x.name), el('span', 'zeit' + (t ? '' : ' leer'), zeit));
+        z.append(zeile);
+        const text = taetigkeiten[x.user_id + '|' + fuer];
+        if (text) z.append(el('div', 'text', text));
+        else if (t) z.append(el('div', 'fehlt', t.laeuft ? 'noch nichts eingetragen' : 'nichts eingetragen'));
+        const marken = [];
+        if (t && t.stoppFehlt) marken.push('Stopp fehlt');
+        if (wartet) marken.push('Nachtrag wartet auf Freigabe');
+        if (marken.length) z.append(el('div', 'marke', marken.join(' · ')));
+        k.append(z);
+      });
+      liste.replaceChildren(k);
+    }
+
+    regelmaessig(box, holen);
+  }
+
   // ---------- Chef ----------
   function zeigeChef(ziel) {
     const box = el('div', 'st');
@@ -728,6 +835,8 @@
     let urlaubKarte = null, urlaubStand = '';
     const vorschauKnopf = el('button', 'st-knopf leise', 'Mitarbeiter-Ansicht ausprobieren');
     vorschauKnopf.addEventListener('click', () => zeigeVorschau(ziel, () => zeigeChef(ziel)));
+    const taetigkeitenKnopf = el('button', 'st-knopf taetigkeiten', 'Tätigkeiten');
+    taetigkeitenKnopf.addEventListener('click', () => { location.hash = 'stempeln/taetigkeiten'; });
 
     async function holen() {
       if (laeuft) return;
@@ -776,7 +885,7 @@
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
 
-      teile.push(vorschauKnopf);
+      teile.push(taetigkeitenKnopf, vorschauKnopf);
       if (!personen.length) {
         teile.push(el('div', 'st-hinweis', 'Noch keine Mitarbeiter angelegt. Unten über „Konto für Mitarbeiter anlegen“ hinzufügen.'));
       }
@@ -1190,9 +1299,12 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
-  function zeigeStempeln(ziel) {
+  // rest = Unterseite aus der Adresse (#stempeln/taetigkeiten)
+  function zeigeStempeln(ziel, rest) {
     const profil = window.Profil || {};
-    if (profil.rolle === 'chef') zeigeChef(ziel); else zeigeMitarbeiter(ziel);
+    if (profil.rolle !== 'chef') zeigeMitarbeiter(ziel);
+    else if (rest === 'taetigkeiten') zeigeTaetigkeiten(ziel);
+    else zeigeChef(ziel);
   }
 
   window.zeigeStempeln = zeigeStempeln;

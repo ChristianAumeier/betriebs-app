@@ -146,3 +146,19 @@
 .st-wahl.krank { border-color: #e0a8a8; color: #8a1c1c; }
 .st-wahl:disabled { opacity: 0.5; }
 .st-tag.abwesend .st-wahl { flex: none; min-height: 0; padding: 4px 10px; font-size: 0.85rem; }
+/* Tätigkeiten je Tag für den Chef (v45) */
+.st-knopf.taetigkeiten { background: var(--gruen); font-size: 1.05rem; padding: 14px 12px; }
+.st-datumsleiste { flex-direction: row; align-items: center; justify-content: space-between; gap: 4px; padding: 8px 4px; }
+.st-datumsleiste .mitte { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0; }
+.st-datumsleiste .st-pfeil { font-size: 2rem; padding: 4px 14px; }
+.st-datumsleiste .st-pfeil:disabled { opacity: 0.25; cursor: default; }
+.st-datumsleiste .st-wahl { flex: none; min-height: 0; padding: 4px 12px; font-size: 0.85rem; }
+.st-taetigkeit { display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid #eceee8; }
+.st-taetigkeit:first-child { border-top: 0; padding-top: 0; }
+.st-taetigkeit .zeile { display: flex; gap: 10px; align-items: baseline; }
+.st-taetigkeit .name { font-weight: 700; flex: 1; min-width: 0; }
+.st-taetigkeit .zeit { font-size: 0.85rem; white-space: nowrap; }
+.st-taetigkeit .zeit.leer { color: var(--grau); }
+.st-taetigkeit .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.st-taetigkeit .fehlt { font-size: 0.85rem; color: #6b4e00; font-style: italic; }
+.st-taetigkeit .marke { font-size: 0.75rem; color: #8a1c1c; font-weight: 600; }
