@@ -713,6 +713,151 @@
     window.scrollTo(0, 0);
   }
 
+  // ---------- Chef: Zeiten eines Tages ändern ----------
+  // Christian, 06.11.2026: „Wenn ich was ändere, einfach ändern und keinen Fehler melden.“ Früher kam jede
+  // Berichtigung als zusätzlicher Stempel dazu (zweimal Start → „Stopp fehlt“). Jetzt zeigt der Editor die
+  // Stempel des Tages; Geändertes oder Gestrichenes wird in der Datenbank abgelehnt (nichts gelöscht),
+  // Neues gilt sofort, alles in einem Schritt (031_zeiten_berichtigen.sql).
+  // fertig(gespeichert) wird nach Speichern oder Abbrechen aufgerufen.
+  const ART_REIHE = ['start', 'pause', 'weiter', 'stopp'];
+  function zeitenEditor(p, tag, fertig) {
+    const k = el('div', 'st-editor st-formular');
+    k.append(el('div', 'titel', 'Zeiten von ' + p.name + ' am ' + datumKurz(tag)));
+    const zeilen = el('div', 'st-editzeilen');
+    const meldung = el('div');
+    const dazu = el('div', 'st-zeile');
+    const plusZeit = el('button', 'st-wahl', '＋ Zeit'); plusZeit.type = 'button';
+    const plusPause = el('button', 'st-wahl', '＋ Pause'); plusPause.type = 'button';
+    dazu.append(plusZeit, plusPause);
+    const knoepfe = el('div', 'st-knoepfe klein');
+    const ok = el('button', 'st-knopf start', 'Speichern'); ok.type = 'button';
+    const zurueck = el('button', 'st-knopf leise', 'Abbrechen'); zurueck.type = 'button';
+    knoepfe.append(zurueck, ok);
+    const laden = el('p', 'klein', 'Lädt …');
+    k.append(laden);
+    let alt = [], vorher = 'aus', reihen = [];
+
+    function reihe(art, zeit, orig) {
+      const z = el('div', 'st-editzeile');
+      const a = el('select');
+      ART_REIHE.forEach((w) => { const o = el('option', null, ARTEN[w]); o.value = w; a.append(o); });
+      a.value = art;
+      const u = el('input'); u.type = 'time'; u.value = zeit || '';
+      const x = el('button', 'st-wahl', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Streichen');
+      z.append(a, u, x);
+      if (orig && orig.status === 'offen') z.append(el('span', 'klein hinweis', 'Nachtrag, wartete auf Freigabe'));
+      const r = { z, a, u, orig };
+      x.addEventListener('click', () => { reihen = reihen.filter((y) => y !== r); z.remove(); meldung.replaceChildren(); });
+      [a, u].forEach((f) => f.addEventListener('change', () => meldung.replaceChildren()));
+      reihen.push(r);
+      zeilen.append(z);
+      return r;
+    }
+    // Was als Nächstes kommt, nach dem spätesten Eintrag
+    function naechste() {
+      const g = reihen.filter((r) => r.u.value).sort((a, b) => (a.u.value < b.u.value ? -1 : 1));
+      const letzte = g.length ? g[g.length - 1].a.value : (vorher === 'aus' ? 'stopp' : 'start');
+      return letzte === 'stopp' ? 'start' : letzte === 'pause' ? 'weiter' : 'stopp';
+    }
+    plusZeit.addEventListener('click', () => { reihe(naechste(), '').u.focus(); });
+    plusPause.addEventListener('click', () => { const r = reihe('pause', ''); reihe('weiter', ''); r.u.focus(); });
+
+    // Reihenfolge wie in der Datenbank prüfen; liefert einen Text, wenn etwas nicht passt
+    function pruefen(folge) {
+      let z = vorher, letzterStart = null;
+      for (let i = 0; i < folge.length; i++) {
+        const { art, u } = folge[i];
+        if (art === 'start' && z !== 'aus' && i > 0) {
+          return letzterStart ? 'Zweimal „Start“ (' + letzterStart + ' und ' + u + ') ohne „Stopp“ dazwischen. Den falschen mit ✕ streichen.'
+            : '„Start“ um ' + u + ' passt nicht: davor fehlt ein „Stopp“.';
+        }
+        if (art === 'pause' && z !== 'arbeitet') return '„Pause“ um ' + u + ' passt nicht: davor wurde nicht gearbeitet.';
+        if (art === 'weiter' && z !== 'pause') return '„Pause beenden“ um ' + u + ' passt nicht: davor war keine Pause.';
+        if (art === 'stopp' && z === 'aus') return '„Stopp“ um ' + u + ' passt nicht: davor fehlt der „Start“.';
+        if (art === 'start') letzterStart = u;
+        z = art === 'stopp' ? 'aus' : art === 'pause' ? 'pause' : 'arbeitet';
+      }
+      return null;
+    }
+
+    zurueck.addEventListener('click', () => fertig(false));
+    ok.addEventListener('click', async () => {
+      meldung.replaceChildren();
+      const fehlt = reihen.find((r) => !r.u.value);
+      if (fehlt) { meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Bitte bei jeder Zeile eine Uhrzeit eintragen oder die Zeile mit ✕ streichen.')); return; }
+      const folge = reihen.map((r) => ({ art: r.a.value, u: r.u.value }))
+        .sort((a, b) => (a.u < b.u ? -1 : a.u > b.u ? 1 : ART_REIHE.indexOf(a.art) - ART_REIHE.indexOf(b.art)));
+      const jetzt = uhr(new Date());
+      if (tag === tagVon(new Date()) && folge.some((x) => x.u > jetzt)) { meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Eine Uhrzeit liegt in der Zukunft.')); return; }
+      if (tag > tagVon(new Date())) { meldung.replaceChildren(el('div', 'st-hinweis fehler', 'Der Tag liegt in der Zukunft.')); return; }
+      const falsch = pruefen(folge);
+      if (falsch) { meldung.replaceChildren(el('div', 'st-hinweis fehler', falsch)); return; }
+      // Nur Geändertes schicken: unveränderte Stempel bleiben, wie sie sind (mit Sekunden)
+      const weg = [], frei = [], neu = [];
+      const zeit = (u) => new Date(tag + 'T' + u).toISOString();
+      alt.forEach((o) => {
+        const r = reihen.find((y) => y.orig === o);
+        if (!r) { weg.push(o.id); return; }
+        if (r.a.value !== o.art || r.u.value !== uhr(o.zeit)) { weg.push(o.id); neu.push({ art: r.a.value, zeit: zeit(r.u.value) }); }
+        else if (o.status === 'offen') frei.push(o.id);
+      });
+      reihen.filter((r) => !r.orig).forEach((r) => neu.push({ art: r.a.value, zeit: zeit(r.u.value) }));
+      if (!weg.length && !frei.length && !neu.length) { fertig(false); return; }
+      ok.disabled = true;
+      const { error } = await window.sb.rpc('zeiten_berichtigen', { p_user: p.user_id, p_tag: tag, p_weg: weg, p_frei: frei, p_neu: neu });
+      ok.disabled = false;
+      if (error) { meldung.replaceChildren(fehlerKasten('Nicht gespeichert', error)); return; }
+      fertig(true);
+    });
+
+    (async () => {
+      try {
+        // drei Tage davor mitladen: Zustand vor dem Tag (z. B. Schicht über Mitternacht)
+        const von = new Date(tagPlus(tag, -3) + 'T00:00:00'), bis = new Date(tagPlus(tag, 1) + 'T00:00:00');
+        const { data, error } = await window.sb.from('stempel').select('*').eq('user_id', p.user_id).neq('status', 'abgelehnt')
+          .gte('zeit', von.toISOString()).lt('zeit', bis.toISOString()).order('zeit');
+        if (error) throw error;
+        const liste = (data || []).slice().sort((a, b) => new Date(a.zeit) - new Date(b.zeit) || a.id - b.id);
+        alt = liste.filter((s) => tagVon(s.zeit) === tag);
+        vorher = zustand(liste.filter((s) => tagVon(s.zeit) < tag)).art;
+        alt.forEach((s) => reihe(s.art, uhr(s.zeit), s));
+        const teile = [];
+        if (vorher !== 'aus') teile.push(el('p', 'klein', 'Die Schicht vom Vortag war um Mitternacht noch nicht beendet.'));
+        if (!alt.length) teile.push(el('p', 'klein', 'An dem Tag ist nichts gestempelt. Mit „＋ Zeit“ Start und Stopp eintragen.'));
+        teile.push(zeilen, dazu, el('p', 'klein', 'Uhrzeit ändern, falsche Zeile mit ✕ streichen, fehlende mit ＋ dazu. Gilt sofort.'), knoepfe, meldung);
+        laden.replaceWith(...teile);
+        if (!alt.length) { reihe('start', ''); reihe('stopp', ''); }
+      } catch (e) {
+        laden.replaceWith(fehlerKasten('Zeiten konnten nicht geladen werden', e), knoepfe);
+        ok.style.display = 'none';
+      }
+    })();
+    return k;
+  }
+
+  // Karte „Zeiten ändern oder nachtragen“ (ersetzt beim Chef „Zeit für jemanden eintragen“)
+  function zeitenKarte(personen, nachher) {
+    const d = el('details', 'st-karte st-formular');
+    d.append(el('summary', null, 'Zeiten ändern oder nachtragen'));
+    const z = el('div', 'st-zeile');
+    const wer = el('select');
+    personen.forEach((p) => { const o = el('option', null, p.name); o.value = p.user_id; wer.append(o); });
+    const datum = el('input'); datum.type = 'date'; datum.value = tagVon(new Date()); datum.required = true;
+    [['Wer', wer], ['Tag', datum]].forEach(([t, f]) => { const l = el('label', null, t); l.append(f); z.append(l); });
+    const zeigen = el('button', null, 'Zeiten zeigen'); zeigen.type = 'button';
+    const platz = el('div');
+    zeigen.addEventListener('click', () => {
+      const p = personen.find((x) => x.user_id === wer.value);
+      if (!p || !datum.value) return;
+      platz.replaceChildren(zeitenEditor(p, datum.value, (gespeichert) => {
+        platz.replaceChildren(...(gespeichert ? [el('div', 'st-hinweis ok', 'Gespeichert.')] : []));
+        if (gespeichert) nachher();
+      }));
+    });
+    d.append(el('p', 'klein', 'Schneller: oben bei „Jetzt“ oder im Monat einfach auf die Zeile der Person tippen.'), z, zeigen, platz);
+    return d;
+  }
+
   // ---------- Chef: Tätigkeiten je Tag ----------
   // Knopf „Tätigkeiten“ (Christian, 05.11.2026): alle Mitarbeiter mit dem, was sie an einem Tag gemacht haben;
   // oben Datumsleiste, mit den Pfeilen tageweise zurück und vor. Eigene Unterseite #stempeln/taetigkeiten.
@@ -830,6 +975,16 @@
     // Formulare nur einmal bauen, damit Eingaben das minütliche Neuladen überstehen
     const kontoKarte = kontoFormular(() => holen());
     let nachtragKarte = null, nachtragFuer = '';
+    // Offener Editor „Zeiten ändern“ (nur einer): { schluessel: user|tag|wo, el }; überlebt das Neuladen
+    let editor = null;
+    let letzteDaten = null;
+    function editorOeffnen(p, tag, wo) {
+      const schluessel = p.user_id + '|' + tag + '|' + wo;
+      if (editor && editor.schluessel === schluessel) editor = null; // nochmal tippen = zu
+      else editor = { schluessel, el: zeitenEditor(p, tag, (gespeichert) => { editor = null; if (gespeichert) holen(); else if (letzteDaten) zeichnen(...letzteDaten); }) };
+      if (letzteDaten) zeichnen(...letzteDaten);
+    }
+    function editorHier(p, tag, wo) { return editor && editor.schluessel === p.user_id + '|' + tag + '|' + wo ? editor.el : null; }
     const offen = new Set(); // aufgeklappte Personen im Monat
     const urlaubOffen = new Set(); // aufgeklappte Personen in der Urlaubsübersicht
     let urlaubKarte = null, urlaubStand = '';
@@ -881,6 +1036,9 @@
     }
 
     function zeichnen(personen, imMonat, kuerzlich, offene, taetigkeiten, abwesend, konten) {
+      letzteDaten = [personen, imMonat, kuerzlich, offene, taetigkeiten, abwesend, konten];
+      // Während im Editor getippt wird, nicht neu zeichnen (sonst schließt am Handy Tastatur bzw. Uhrzeit-Rad)
+      if (editor && editor.el.contains(document.activeElement)) return;
       const name = {};
       personen.forEach((p) => { name[p.user_id] = p.name; });
       const teile = [];
@@ -937,7 +1095,14 @@
           zeile.append(el('span', 'punkt ' + (alt ? 'alt' : z.art)), el('span', 'name', p.name),
             el('span', 'zustand', text + (alt ? ' – Stopp vergessen?' : '')),
             el('span', 'std', heute ? stunden(heute.arbeitMs).replace(' Std.', ' h') : ''));
+          // Antippen: Zeiten des Tages ändern (bei vergessenem Stopp der Tag des letzten Starts)
+          const starts = eigene.filter((s) => s.art === 'start');
+          const etag = alt && starts.length ? tagVon(starts[starts.length - 1].zeit) : tagVon(new Date());
+          zeile.classList.add('klickbar');
+          zeile.addEventListener('click', () => editorOeffnen(p, etag, 'jetzt'));
           k.append(zeile);
+          const ed = editorHier(p, etag, 'jetzt');
+          if (ed) k.append(ed);
         });
         teile.push(k);
       }
@@ -975,9 +1140,12 @@
         tage.map((t) => ({ tag: t.tag, t })).concat(weg.map((x) => ({ tag: x.tag, x })), offenIm.map((o) => ({ tag: o, o })))
           .sort((a, b) => (a.tag < b.tag ? -1 : 1)).forEach(({ t, x, o }) => {
             if (o) {
-              const z = el('div', 'st-tag abwesend offen');
+              const z = el('div', 'st-tag abwesend offen klickbar');
               z.append(el('span', 'datum', datumKurz(o)), el('span', 'zeit', 'offen – nichts eingetragen'));
+              z.addEventListener('click', () => editorOeffnen(p, o, 'monat'));
               d.append(z);
+              const ed = editorHier(p, o, 'monat');
+              if (ed) d.append(ed);
               export_.push([p.name, o.split('-').reverse().join('.'), '', '', '', '', '', 'offen (nichts eingetragen)']);
               return;
             }
@@ -987,7 +1155,12 @@
               return;
             }
             const taetigkeit = taetigkeiten[p.user_id + '|' + t.tag] || '';
-            d.append(tagesZeile(t, taetigkeit));
+            const tz = tagesZeile(t, taetigkeit);
+            tz.classList.add('klickbar');
+            tz.addEventListener('click', () => editorOeffnen(p, t.tag, 'monat'));
+            d.append(tz);
+            const ed = editorHier(p, t.tag, 'monat');
+            if (ed) d.append(ed);
             export_.push([p.name, t.tag.split('-').reverse().join('.'), uhr(t.beginn), t.ende ? uhr(t.ende) : '',
               dezimal(t.pauseMs), dezimal(t.arbeitMs), taetigkeit, [t.stoppFehlt ? 'Stopp fehlt' : '', t.nachtrag ? 'Nachtrag' : ''].filter(Boolean).join(', ')]);
           });
@@ -1012,7 +1185,7 @@
       }
 
       const fuer = personen.map((p) => p.user_id + p.name).join();
-      if (fuer !== nachtragFuer) { nachtragFuer = fuer; nachtragKarte = personen.length ? nachtragFormular(personen, () => holen()) : null; }
+      if (fuer !== nachtragFuer) { nachtragFuer = fuer; nachtragKarte = personen.length ? zeitenKarte(personen, () => holen()) : null; }
       if (nachtragKarte) teile.push(nachtragKarte);
       teile.push(kontoKarte);
       box.replaceChildren(...teile);

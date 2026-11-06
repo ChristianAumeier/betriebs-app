@@ -162,3 +162,14 @@
 .st-taetigkeit .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .st-taetigkeit .fehlt { font-size: 0.85rem; color: #6b4e00; font-style: italic; }
 .st-taetigkeit .marke { font-size: 0.75rem; color: #8a1c1c; font-weight: 600; }
+/* Zeiten eines Tages ändern (v46) */
+.klickbar { cursor: pointer; -webkit-tap-highlight-color: rgba(46, 93, 52, 0.12); }
+.st-editor { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; padding: 12px; border: 2px solid #9fd3b3; border-radius: 12px; background: #f3fbf6; }
+.st-editor .titel { font-weight: 700; }
+.st-editzeilen { display: flex; flex-direction: column; gap: 6px; }
+.st-editzeile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 6.5em) 44px; gap: 6px; align-items: center; }
+.st-editzeile > * { min-width: 0; width: 100%; box-sizing: border-box; }
+.st-editzeile .hinweis { grid-column: 1 / -1; color: #6b4e00; }
+.st-editor button.st-wahl { background: #fff; color: var(--text); border: 1px solid var(--rand); font-weight: 600; padding: 8px; }
+.st-editzeile button.st-wahl { min-height: 44px; padding: 0; color: #8a1c1c; }
+.st-editor .st-zeile .st-wahl { flex: 1; color: var(--gruen); }
