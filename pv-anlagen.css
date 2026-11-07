@@ -1,4 +1,4 @@
-/* Bereich „PV Stockhalle“ */
+/* Bereich „PV-Anlagen“ (pv-anlagen.js): Stockhalle, BGA neu, BGA alt in einer Kachel */
 .ph { display: flex; flex-direction: column; gap: 12px; }
 .ph-meldungen { display: flex; flex-direction: column; gap: 8px; }
 .ph-meldungen:empty { display: none; }
@@ -7,24 +7,44 @@
 .ph-hinweis { padding: 8px 12px; border-radius: 8px; background: #fff4d6; color: #6b4e00; font-size: 0.85rem; }
 .ph-hinweis.fehler { background: #fde2e2; color: #8a1c1c; }
 
+/* Summe aller Anlagen */
 .ph-gesamt {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding: 14px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #f5b301 0%, #e08e00 100%);
+  background: linear-gradient(135deg, #4a5a45 0%, #2f3b2c 100%);
   color: #fff;
   text-align: center;
 }
 .ph-gesamt .zahl { font-size: 1.5rem; font-weight: 700; }
 .ph-gesamt .text { font-size: 0.8rem; opacity: 0.9; }
-.ph-spez { grid-column: 1 / -1; border-top: 1px solid rgba(255, 255, 255, 0.4); padding-top: 10px; }
-.ph-spez .titel { font-size: 0.8rem; opacity: 0.9; margin-bottom: 4px; }
-.ph-spez .werte { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.ph-spez .zahl { font-size: 1.15rem; }
-.ph-spez .hinweis { font-size: 0.72rem; opacity: 0.85; margin-top: 6px; }
-.ph-spez .hinweis.wichtig { opacity: 1; font-size: 0.8rem; font-weight: 600; background: rgba(0, 0, 0, 0.18); border-radius: 6px; padding: 4px 8px; }
+
+/* Je Anlage eine farbige Karte */
+.pa-anlage { border-radius: 12px; overflow: hidden; color: #fff; }
+.pa-anlage.stockhalle { background: linear-gradient(135deg, #f5b301 0%, #e08e00 100%); }
+.pa-anlage.neu { background: linear-gradient(135deg, #2f8fd6 0%, #1f6aa8 100%); }
+.pa-anlage.alt { background: linear-gradient(135deg, #6c8a3d 0%, #4f6a2a 100%); }
+.pa-anlage .oben { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pa-anlage .titel { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pa-anlage .titel .name { font-weight: 700; font-size: 1.05rem; }
+.pa-anlage .titel .klein { font-size: 0.75rem; opacity: 0.9; }
+.pa-anlage .werte { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; }
+.pa-anlage .zahl { font-size: 1.15rem; font-weight: 700; }
+.pa-anlage .text { font-size: 0.75rem; opacity: 0.9; }
+.pa-anlage .spez { border-top: 1px solid rgba(255, 255, 255, 0.4); padding-top: 8px; }
+.pa-anlage .spez .unter { font-size: 0.75rem; opacity: 0.9; margin-bottom: 4px; text-align: center; }
+.pa-anlage .spez .zahl { font-size: 1.05rem; }
+.pa-anlage .hinweis { opacity: 1; font-size: 0.8rem; font-weight: 600; background: rgba(0, 0, 0, 0.18); border-radius: 6px; padding: 4px 8px; }
+
+/* Wechselrichter zum Aufklappen */
+.pa-anlage details { background: rgba(255, 255, 255, 0.92); color: var(--text, #1f2a1c); }
+.pa-anlage summary { padding: 10px 14px; cursor: pointer; font-weight: 600; font-size: 0.9rem; list-style: none; }
+.pa-anlage summary::-webkit-details-marker { display: none; }
+.pa-anlage summary::before { content: '▸ '; }
+.pa-anlage details[open] summary::before { content: '▾ '; }
+.pa-anlage .ph-liste { padding: 0 10px 10px; }
 
 .ph-liste { display: grid; grid-template-columns: 1fr; gap: 10px; }
 @media (min-width: 600px) { .ph-liste { grid-template-columns: 1fr 1fr; } }
@@ -57,7 +77,7 @@
 
 .ph-fussnote { font-size: 0.75rem; color: var(--grau); text-align: center; }
 
-/* Datumsleiste beider PV-Bereiche (pv-tag.js), Aussehen wie bei „Tätigkeiten“ */
+/* Datumsleiste (pv-tag.js), Aussehen wie bei „Tätigkeiten“ */
 .pv-tagleiste {
   display: flex; align-items: center; justify-content: space-between; gap: 4px;
   background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; padding: 8px 4px;

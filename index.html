@@ -12,8 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Betrieb Aumeier">
   <link rel="stylesheet" href="anmeldung.css">
   <link rel="stylesheet" href="energie-zuhause.css">
-  <link rel="stylesheet" href="pv-stockhalle.css">
-  <link rel="stylesheet" href="pv-biogas.css">
+  <link rel="stylesheet" href="pv-anlagen.css">
   <link rel="stylesheet" href="meldungen.css">
   <link rel="stylesheet" href="stempeln.css">
   <link rel="stylesheet" href="bahnschwellen.css">
@@ -112,13 +111,12 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v51</footer>
+  <footer>v52</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script src="pv-tag.js"></script>
-  <script src="pv-stockhalle.js"></script>
-  <script src="pv-biogas.js"></script>
+  <script src="pv-anlagen.js"></script>
   <script src="meldungen.js"></script>
   <script src="stempeln.js"></script>
   <script src="scanner.js"></script>
@@ -136,8 +134,7 @@
       { id: 'bahnschwellen', name: 'Bahnschwellen', symbol: '🚛', seite: window.zeigeBahnschwellen },
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
       { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause, nurChef: true },
-      { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle, nurChef: true },
-      { id: 'pv-biogas', name: 'PV Biogasanlage', symbol: '🔆', seite: window.zeigePvBiogas, nurChef: true },
+      { id: 'pv-anlagen', name: 'PV-Anlagen', symbol: '☀️', seite: window.zeigePvAnlagen, nurChef: true },
       { id: 'stempeln', name: 'Stempeln', symbol: '⏱️', seite: window.zeigeStempeln }
     ];
 
