@@ -221,7 +221,9 @@
       spezWerte.append(d);
     });
     spez.append(spezWerte);
-    if (ersterTag > monatAb || ersterTag > jahrAb) {
+    if (!heuteWerte.length && !vorher.length) {
+      spez.append(el('div', 'hinweis', 'Für diesen Zeitraum sind keine Werte gespeichert.'));
+    } else if (ersterTag > monatAb || ersterTag > jahrAb) {
       spez.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
         + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
     }

@@ -246,7 +246,21 @@
         [daten ? zahl(jahr / an.kwp, 2) : '–', 'Jahr']
       ]));
       kopf.append(spez);
-      if (ersterTag > monatAb || ersterTag > jahrAb) {
+      // Läuft die Anlage erst seit kurzem (neue PV ab 28.10.2026), sind Monat/Jahr nur wenige Tage:
+      // deutlich dazuschreiben, sonst wirkt z. B. 4,39 kWh/kWp im Oktober wie ein Fehler (Christian, 07.11.2026).
+      const ertragsTage = vorher.filter((t) => ids.has(t.id) && Number(t.kwh) > 0).map((t) => t.tag);
+      if (heute > 0) ertragsTage.push(tag);
+      const ersterBetrieb = ertragsTage.length ? ertragsTage.reduce((a, b) => (a < b ? a : b)) : null;
+      const tageSeit = (ab) => Math.round((Date.parse(tag) - Date.parse(ab)) / 86400000) + 1;
+      if (ersterBetrieb && ersterBetrieb > ersterTag && ersterBetrieb > jahrAb) {
+        const imMonat = ersterBetrieb > monatAb;
+        kopf.append(el('div', 'hinweis wichtig', an.titel + ' liefert erst seit ' + tagText(ersterBetrieb) + ': '
+          + (imMonat ? 'Monat und Jahr enthalten nur ' + tageSeit(ersterBetrieb) + ' Tage'
+            : 'Jahr enthält nur ' + tageSeit(ersterBetrieb) + ' Tage')
+          + ' (erster Tag nur teilweise).'));
+      } else if (!daten) {
+        kopf.append(el('div', 'hinweis', 'Für diesen Zeitraum sind keine Werte gespeichert.'));
+      } else if (ersterTag > monatAb || ersterTag > jahrAb) {
         kopf.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
           + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
       }
