@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="anmeldung.css">
   <link rel="stylesheet" href="energie-zuhause.css">
   <link rel="stylesheet" href="pv-stockhalle.css">
+  <link rel="stylesheet" href="pv-biogas.css">
   <link rel="stylesheet" href="meldungen.css">
   <link rel="stylesheet" href="stempeln.css">
   <link rel="stylesheet" href="bahnschwellen.css">
@@ -111,11 +112,12 @@
     <span id="titel">Betrieb Aumeier</span>
   </header>
   <main id="inhalt"></main>
-  <footer>v46</footer>
+  <footer>v47</footer>
   <script src="lib/supabase-2.117.2.js"></script>
   <script src="anmeldung.js"></script>
   <script src="energie-zuhause.js"></script>
   <script src="pv-stockhalle.js"></script>
+  <script src="pv-biogas.js"></script>
   <script src="meldungen.js"></script>
   <script src="stempeln.js"></script>
   <script src="scanner.js"></script>
@@ -134,6 +136,7 @@
       { id: 'wartung-biogas', name: 'Wartung Biogasanlage', symbol: '🔧' },
       { id: 'energie-zuhause', name: 'Energie Zuhause', symbol: '🏠', seite: window.zeigeEnergieZuhause, nurChef: true },
       { id: 'pv-stockhalle', name: 'PV Stockhalle', symbol: '☀️', seite: window.zeigePvStockhalle, nurChef: true },
+      { id: 'pv-biogas', name: 'PV Biogasanlage', symbol: '🔆', seite: window.zeigePvBiogas, nurChef: true },
       { id: 'stempeln', name: 'Stempeln', symbol: '⏱️', seite: window.zeigeStempeln }
     ];
 
