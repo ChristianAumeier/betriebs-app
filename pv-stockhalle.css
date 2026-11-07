@@ -24,6 +24,7 @@
 .ph-spez .werte { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .ph-spez .zahl { font-size: 1.15rem; }
 .ph-spez .hinweis { font-size: 0.72rem; opacity: 0.85; margin-top: 6px; }
+.ph-spez .hinweis.wichtig { opacity: 1; font-size: 0.8rem; font-weight: 600; background: rgba(0, 0, 0, 0.18); border-radius: 6px; padding: 4px 8px; }
 
 .ph-liste { display: grid; grid-template-columns: 1fr; gap: 10px; }
 @media (min-width: 600px) { .ph-liste { grid-template-columns: 1fr 1fr; } }

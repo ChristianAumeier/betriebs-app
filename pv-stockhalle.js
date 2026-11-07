@@ -224,8 +224,10 @@
     if (!heuteWerte.length && !vorher.length) {
       spez.append(el('div', 'hinweis', 'Für diesen Zeitraum sind keine Werte gespeichert.'));
     } else if (ersterTag > monatAb || ersterTag > jahrAb) {
-      spez.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
-        + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
+      // deutlich und mit Anzahl der Tage, sonst wirkt z. B. 11,43 kWh/kWp für Monat und Jahr wie ein Fehler (Christian, 07.11.2026)
+      const tage = Math.round((Date.parse(tag) - Date.parse(ersterTag)) / 86400000) + 1;
+      spez.append(el('div', 'hinweis wichtig', 'Tageswerte erst seit ' + tagText(ersterTag) + ': '
+        + (ersterTag > monatAb ? 'Monat und Jahr enthalten' : 'Jahr enthält') + ' nur ' + tage + (tage === 1 ? ' Tag.' : ' Tage.')));
     }
     gesamt.append(spez);
     box.append(gesamt);

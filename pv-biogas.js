@@ -254,15 +254,16 @@
       const tageSeit = (ab) => Math.round((Date.parse(tag) - Date.parse(ab)) / 86400000) + 1;
       if (ersterBetrieb && ersterBetrieb > ersterTag && ersterBetrieb > jahrAb) {
         const imMonat = ersterBetrieb > monatAb;
+        const n = tageSeit(ersterBetrieb);
         kopf.append(el('div', 'hinweis wichtig', an.titel + ' liefert erst seit ' + tagText(ersterBetrieb) + ': '
-          + (imMonat ? 'Monat und Jahr enthalten nur ' + tageSeit(ersterBetrieb) + ' Tage'
-            : 'Jahr enthält nur ' + tageSeit(ersterBetrieb) + ' Tage')
+          + (imMonat ? 'Monat und Jahr enthalten' : 'Jahr enthält') + ' nur ' + n + (n === 1 ? ' Tag' : ' Tage')
           + ' (erster Tag nur teilweise).'));
       } else if (!daten) {
         kopf.append(el('div', 'hinweis', 'Für diesen Zeitraum sind keine Werte gespeichert.'));
       } else if (ersterTag > monatAb || ersterTag > jahrAb) {
-        kopf.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
-          + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
+        const n = tageSeit(ersterTag);
+        kopf.append(el('div', 'hinweis wichtig', 'Tageswerte erst seit ' + tagText(ersterTag) + ': '
+          + (ersterTag > monatAb ? 'Monat und Jahr enthalten' : 'Jahr enthält') + ' nur ' + n + (n === 1 ? ' Tag.' : ' Tage.')));
       }
       koepfe.push(kopf);
 
