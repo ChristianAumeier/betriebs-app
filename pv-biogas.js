@@ -195,7 +195,10 @@
     ]).children);
     box.append(gesamt);
 
-    // Je Anlage: Summe, kWh pro kWp, dann die Wechselrichter
+    // Erst die Köpfe beider Anlagen (Summe, kWh pro kWp) oben, darunter die Wechselrichter je Anlage
+    // (Christian, 07.11.2026: die grüne Anzeige der alten PV soll auch nach oben)
+    const koepfe = [];
+    const listen = [];
     ANLAGEN.forEach((an) => {
       const gruppe = geraete.filter((g) => g.w.anlage === an.key);
       if (!gruppe.length) return;
@@ -226,8 +229,9 @@
         kopf.append(el('div', 'hinweis', 'Tageswerte erst ab ' + tagText(ersterTag) + ', '
           + (ersterTag > monatAb ? 'Monat und Jahr' : 'Jahr') + ' deshalb noch unvollständig.'));
       }
-      box.append(kopf);
+      koepfe.push(kopf);
 
+      listen.push(el('div', 'pb-zwischen ' + an.key, 'Wechselrichter ' + an.titel.toLowerCase().replace('anlage', 'Anlage')));
       const liste = el('div', 'ph-liste');
       gruppe.forEach((g) => {
         const monatG = summeVorher(new Set([g.w.id]), monatAb) + (istZahl(g.heuteKwh) ? g.heuteKwh : 0);
@@ -254,8 +258,9 @@
         k.append(el('div', 'fuss', fuss));
         liste.append(k);
       });
-      box.append(liste);
+      listen.push(liste);
     });
+    box.append(...koepfe, ...listen);
 
     box.append(el('div', 'ph-fussnote',
       'Werte der Wechselrichter vom Solar-Log, gemeldet vom Büro-PC (nur solange dort der Solar-Log-Tab offen ist). '
