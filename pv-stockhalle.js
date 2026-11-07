@@ -45,11 +45,11 @@
     return t + '.' + m + '.' + j;
   }
 
-  // Tageswerte seit Jahresbeginn; Supabase liefert höchstens 1000 Zeilen je Anfrage, deshalb seitenweise
-  async function tageswerteHolen(abTag) {
+  // Tageswerte von Jahresbeginn bis zum gezeigten Tag; Supabase liefert höchstens 1000 Zeilen je Anfrage, deshalb seitenweise
+  async function tageswerteHolen(abTag, bisTag) {
     const zeilen = [];
     for (let von = 0; ; von += 1000) {
-      const r = await window.sb.from('pv_tag').select('sn, tag, kwh').gte('tag', abTag)
+      const r = await window.sb.from('pv_tag').select('sn, tag, kwh').gte('tag', abTag).lte('tag', bisTag)
         .order('tag').order('sn').range(von, von + 999);
       if (r.error) throw r.error;
       zeilen.push(...(r.data || []));
@@ -57,42 +57,43 @@
     }
   }
 
-  // Ansicht öffnen: Daten holen, jede Minute neu holen; beim Verlassen hört alles auf.
+  // Ansicht öffnen: Daten holen, jede Minute neu holen (nur für heute); beim Verlassen hört alles auf.
+  // Oben die Datumsleiste (pv-tag.js): vergangene Tage zeigen nur Tageswerte aus pv_tag.
   function zeigePvStockhalle(ziel) {
     const box = el('div', 'ph');
+    const leiste = window.PvTag.leiste(() => { inhalt.replaceChildren(el('div', 'ph-stand', 'Lädt …')); holen(); });
     const stand = el('div', 'ph-stand', 'Werte werden geladen …');
     const meldung = el('div', 'ph-meldungen');
     const inhalt = el('div', 'ph');
-    box.append(stand, meldung, inhalt);
+    box.append(leiste.element, stand, meldung, inhalt);
     ziel.replaceChildren(box);
-    let laeuft = false;
+    let anfrage = 0; // beim schnellen Blättern zählt nur die letzte Antwort
 
     async function holen() {
-      if (laeuft || !box.isConnected) return;
-      laeuft = true;
+      if (!box.isConnected) return;
+      const nr = ++anfrage;
+      const tag = leiste.tag();
       try {
         const [w, l, a, tage] = await Promise.all([
           window.sb.from('pv_wechselrichter').select('*').eq('anlage', 'Stockhalle').order('sortierung'),
           window.sb.from('pv_live').select('sn, gemeldet_am, leistung_w, heute_kwh, gesamt_kwh, temperatur, stick'),
           window.sb.from('pv_abruf').select('*').maybeSingle(),
-          tageswerteHolen(tagBerlin(new Date()).slice(0, 4) + '-01-01')
+          tageswerteHolen(tag.slice(0, 4) + '-01-01', tag)
         ]);
-        if (!box.isConnected) return;
+        if (nr !== anfrage || !box.isConnected) return;
         const fehler = w.error || l.error || a.error;
         if (fehler) throw fehler;
-        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data, tage);
+        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data, tage, tag);
       } catch (e) {
-        if (!box.isConnected) return;
+        if (nr !== anfrage || !box.isConnected) return;
         const text = (e && e.message) ? e.message + (e.code ? ' (' + e.code + ')' : '') : String(e);
         meldung.replaceChildren(el('div', 'ph-hinweis fehler', 'Werte konnten nicht geladen werden: ' + text));
         stand.textContent = '';
-      } finally {
-        laeuft = false;
       }
     }
 
     const abfrage = setInterval(() => {
-      if (!box.isConnected) aufhoeren(); else if (!document.hidden) holen();
+      if (!box.isConnected) aufhoeren(); else if (!document.hidden && leiste.istHeute()) holen();
     }, ABFRAGE_MS);
     function sichtbar() { if (!document.hidden) holen(); }
     document.addEventListener('visibilitychange', sichtbar);
@@ -103,14 +104,22 @@
     holen();
   }
 
-  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf, tage) {
+  // tag = gezeigter Tag (JJJJ-MM-TT). Heute: Live-Werte und Warnungen; früher: nur Tageswerte aus pv_tag.
+  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf, tage, tag) {
     const jetzt = Date.now();
     const heute = heuteBerlin(new Date());
+    const istHeute = tag === tagBerlin(new Date());
     const nachSn = {};
     live.forEach((x) => { nachSn[x.sn] = x; });
+    const amTag = {};
+    (tage || []).filter((t) => t.tag === tag).forEach((t) => { amTag[t.sn] = Number(t.kwh); });
 
     // Je Anlage aufbereiten
     const anlagen = wechselrichter.map((w) => {
+      if (!istHeute) {
+        return { w, zeit: null, alterMin: Infinity, aktuell: false, leistung: null,
+          heuteKwh: istZahl(amTag[w.sn]) ? amTag[w.sn] : null, gesamtKwh: null };
+      }
       const x = nachSn[w.sn] || {};
       const zeit = x.gemeldet_am ? new Date(x.gemeldet_am) : null;
       const alterMin = zeit ? (jetzt - zeit.getTime()) / 60000 : Infinity;
@@ -132,7 +141,9 @@
     anlagen.forEach((a) => {
       a.warnung = '';
       const titel = 'Anlage ' + a.w.nr + ' „' + a.w.name + '“';
-      if (!a.zeit) {
+      if (!istHeute) {
+        // vergangene Tage: keine Warnungen
+      } else if (!a.zeit) {
         a.warnung = 'hat noch nie gemeldet';
       } else if (!a.aktuell && sonne) {
         a.warnung = 'meldet seit ' + datumZeit(a.zeit) + ' nicht';
@@ -148,9 +159,12 @@
       if (a.warnung) warnungen.push(titel + ' ' + a.warnung + '.');
     });
 
-    // Kopf: Stand des Abrufs und Fehler
+    // Kopf: Stand des Abrufs und Fehler (nur heute)
     meldung.replaceChildren();
-    if (abruf && abruf.letzter_erfolg) {
+    stand.classList.remove('alt');
+    if (!istHeute) {
+      stand.textContent = 'Tageswerte von Growatt';
+    } else if (abruf && abruf.letzter_erfolg) {
       const sek = (jetzt - new Date(abruf.letzter_erfolg).getTime()) / 1000;
       stand.textContent = 'Von Growatt abgerufen ' + vorWieLange(sek);
       stand.classList.toggle('alt', sek > ABRUF_ALT_MIN * 60);
@@ -160,7 +174,7 @@
     } else {
       stand.textContent = 'Noch kein Abruf bei Growatt.';
     }
-    if (abruf && abruf.fehler) {
+    if (istHeute && abruf && abruf.fehler) {
       meldung.append(el('div', 'ph-hinweis fehler', 'Letzter Abruf fehlgeschlagen: ' + abruf.fehler));
     }
     warnungen.forEach((t) => meldung.append(el('div', 'ph-hinweis', t)));
@@ -171,29 +185,34 @@
     const summeW = aktuelle.reduce((s, a) => s + a.leistung, 0);
     const heuteWerte = anlagen.map((a) => a.heuteKwh).filter(istZahl);
     const summeHeute = heuteWerte.reduce((s, v) => s + v, 0);
+
+    // Spezifischer Ertrag (kWh pro kWp): Tage vor dem gezeigten Tag aus pv_tag, der Tag selbst wie oben
+    const monatAb = tag.slice(0, 8) + '01';
+    const jahrAb = tag.slice(0, 5) + '01-01';
+    const unsere = new Set(wechselrichter.map((x) => x.sn));
+    const vorher = (tage || []).filter((t) => unsere.has(t.sn) && t.tag < tag && istZahl(Number(t.kwh)));
+    const summeAb = (ab) => vorher.filter((t) => t.tag >= ab).reduce((s, t) => s + Number(t.kwh), 0) + summeHeute;
+    const ersterTag = vorher.length ? vorher[0].tag : tag;
+    const vorherJe = (sn, ab) => vorher.filter((t) => t.sn === sn && t.tag >= ab).reduce((s, t) => s + Number(t.kwh), 0);
+
     const gesamt = el('div', 'ph-gesamt');
-    [
+    (istHeute ? [
       [aktuelle.length ? kw(summeW) : '–', 'Leistung jetzt'],
       [heuteWerte.length ? kwh(summeHeute, 1) : '–', 'heute erzeugt']
-    ].forEach(([z, t]) => {
+    ] : [
+      [heuteWerte.length ? kwh(summeHeute, 1) : '–', 'an diesem Tag erzeugt'],
+      [heuteWerte.length || vorher.length ? kwh(summeAb(monatAb), 0) : '–', 'im Monat bis dahin']
+    ]).forEach(([z, t]) => {
       const d = el('div');
       d.append(el('div', 'zahl', z), el('div', 'text', t));
       gesamt.append(d);
     });
 
-    // Spezifischer Ertrag (kWh pro kWp): vergangene Tage aus pv_tag, heute wie oben aus den Live-Werten
-    const heuteIso = tagBerlin(new Date());
-    const monatAb = heuteIso.slice(0, 8) + '01';
-    const jahrAb = heuteIso.slice(0, 5) + '01-01';
-    const unsere = new Set(wechselrichter.map((x) => x.sn));
-    const vorher = (tage || []).filter((t) => unsere.has(t.sn) && t.tag < heuteIso && istZahl(Number(t.kwh)));
-    const summeAb = (ab) => vorher.filter((t) => t.tag >= ab).reduce((s, t) => s + Number(t.kwh), 0) + summeHeute;
-    const ersterTag = vorher.length ? vorher[0].tag : heuteIso;
     const spez = el('div', 'ph-spez');
-    spez.append(el('div', 'titel', 'kWh pro kWp (' + KWP + ' kWp)'));
+    spez.append(el('div', 'titel', 'kWh pro kWp (' + KWP + ' kWp)' + (istHeute ? '' : ', Monat und Jahr bis zu diesem Tag')));
     const spezWerte = el('div', 'werte');
     [
-      [heuteWerte.length ? zahl(summeHeute / KWP, 2) : '–', 'heute'],
+      [heuteWerte.length ? zahl(summeHeute / KWP, 2) : '–', istHeute ? 'heute' : 'Tag'],
       [heuteWerte.length || vorher.length ? zahl(summeAb(monatAb) / KWP, 2) : '–', 'Monat'],
       [heuteWerte.length || vorher.length ? zahl(summeAb(jahrAb) / KWP, 2) : '–', 'Jahr']
     ].forEach(([z, t]) => {
@@ -219,11 +238,16 @@
       k.append(kopf);
 
       const werte = el('div', 'werte');
-      [
+      const tagA = istZahl(a.heuteKwh) ? a.heuteKwh : 0;
+      (istHeute ? [
         [kw(a.leistung), 'jetzt'],
         [kwh(a.heuteKwh, 1), 'heute'],
         [istZahl(a.gesamtKwh) ? zahl(a.gesamtKwh / 1000, 1) + ' MWh' : '–', 'gesamt']
-      ].forEach(([z, t]) => {
+      ] : [
+        [kwh(a.heuteKwh, 1), 'Tag'],
+        [kwh(vorherJe(a.w.sn, monatAb) + tagA, 0), 'Monat'],
+        [kwh(vorherJe(a.w.sn, jahrAb) + tagA, 0), 'Jahr']
+      ]).forEach(([z, t]) => {
         const d = el('div');
         d.append(el('div', 'zahl', z), el('div', 'text', t));
         werte.append(d);
@@ -239,7 +263,8 @@
         k.append(balken);
       }
 
-      const fuss = a.warnung ? a.warnung.charAt(0).toUpperCase() + a.warnung.slice(1)
+      const fuss = !istHeute ? (istZahl(a.heuteKwh) ? '' : 'Für diesen Tag kein Wert')
+        : a.warnung ? a.warnung.charAt(0).toUpperCase() + a.warnung.slice(1)
         : a.zeit ? 'Gemeldet ' + vorWieLange((jetzt - a.zeit.getTime()) / 1000) : '';
       k.append(el('div', 'fuss', fuss));
       liste.append(k);

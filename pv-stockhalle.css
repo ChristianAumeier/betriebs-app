@@ -55,3 +55,18 @@
 .ph-balken > div { height: 100%; background: #f5b301; border-radius: 4px; }
 
 .ph-fussnote { font-size: 0.75rem; color: var(--grau); text-align: center; }
+
+/* Datumsleiste beider PV-Bereiche (pv-tag.js), Aussehen wie bei „Tätigkeiten“ */
+.pv-tagleiste {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; padding: 8px 4px;
+}
+.pv-tagleiste .mitte { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0; }
+.pv-tagleiste .datum { font-weight: 700; }
+.pv-tagleiste .unter { font-size: 0.8rem; color: var(--grau); }
+.pv-tagleiste .pfeil { font: inherit; font-size: 2rem; border: 0; background: none; color: var(--gruen); padding: 4px 14px; cursor: pointer; }
+.pv-tagleiste .pfeil:disabled { opacity: 0.25; cursor: default; }
+.pv-tagleiste .heute {
+  font: inherit; font-weight: 600; font-size: 0.85rem; padding: 4px 12px;
+  border: 1px solid var(--rand); border-radius: 10px; background: #fff; cursor: pointer;
+}

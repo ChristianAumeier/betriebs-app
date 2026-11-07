@@ -53,11 +53,11 @@
     return z;
   }
 
-  // Tageswerte seit Jahresbeginn; Supabase liefert höchstens 1000 Zeilen je Anfrage, deshalb seitenweise
-  async function tageswerteHolen(abTag) {
+  // Tageswerte von Jahresbeginn bis zum gezeigten Tag; Supabase liefert höchstens 1000 Zeilen je Anfrage, deshalb seitenweise
+  async function tageswerteHolen(abTag, bisTag) {
     const zeilen = [];
     for (let von = 0; ; von += 1000) {
-      const r = await window.sb.from('pvbga_tag').select('id, tag, kwh').gte('tag', abTag)
+      const r = await window.sb.from('pvbga_tag').select('id, tag, kwh').gte('tag', abTag).lte('tag', bisTag)
         .order('tag').order('id').range(von, von + 999);
       if (r.error) throw r.error;
       zeilen.push(...(r.data || []));
@@ -65,42 +65,43 @@
     }
   }
 
-  // Ansicht öffnen: Daten holen, jede Minute neu holen; beim Verlassen hört alles auf.
+  // Ansicht öffnen: Daten holen, jede Minute neu holen (nur für heute); beim Verlassen hört alles auf.
+  // Oben die Datumsleiste (pv-tag.js): vergangene Tage zeigen nur Tageswerte.
   function zeigePvBiogas(ziel) {
     const box = el('div', 'ph');
+    const leiste = window.PvTag.leiste(() => { inhalt.replaceChildren(el('div', 'ph-stand', 'Lädt …')); holen(); });
     const stand = el('div', 'ph-stand', 'Werte werden geladen …');
     const meldung = el('div', 'ph-meldungen');
     const inhalt = el('div', 'ph');
-    box.append(stand, meldung, inhalt);
+    box.append(leiste.element, stand, meldung, inhalt);
     ziel.replaceChildren(box);
-    let laeuft = false;
+    let anfrage = 0; // beim schnellen Blättern zählt nur die letzte Antwort
 
     async function holen() {
-      if (laeuft || !box.isConnected) return;
-      laeuft = true;
+      if (!box.isConnected) return;
+      const nr = ++anfrage;
+      const tag = leiste.tag();
       try {
         const [w, l, a, tage] = await Promise.all([
           window.sb.from('pvbga_wechselrichter').select('*').order('sortierung'),
           window.sb.from('pvbga_live').select('*'),
           window.sb.from('pvbga_abruf').select('*').maybeSingle(),
-          tageswerteHolen(tagBerlin(new Date()).slice(0, 4) + '-01-01')
+          tageswerteHolen(tag.slice(0, 4) + '-01-01', tag)
         ]);
-        if (!box.isConnected) return;
+        if (nr !== anfrage || !box.isConnected) return;
         const fehler = w.error || l.error || a.error;
         if (fehler) throw fehler;
-        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data, tage);
+        zeichnen(inhalt, meldung, stand, w.data || [], l.data || [], a.data, tage, tag);
       } catch (e) {
-        if (!box.isConnected) return;
+        if (nr !== anfrage || !box.isConnected) return;
         const text = (e && e.message) ? e.message + (e.code ? ' (' + e.code + ')' : '') : String(e);
         meldung.replaceChildren(el('div', 'ph-hinweis fehler', 'Werte konnten nicht geladen werden: ' + text));
         stand.textContent = '';
-      } finally {
-        laeuft = false;
       }
     }
 
     const abfrage = setInterval(() => {
-      if (!box.isConnected) aufhoeren(); else if (!document.hidden) holen();
+      if (!box.isConnected) aufhoeren(); else if (!document.hidden && leiste.istHeute()) holen();
     }, ABFRAGE_MS);
     function sichtbar() { if (!document.hidden) holen(); }
     document.addEventListener('visibilitychange', sichtbar);
@@ -111,24 +112,31 @@
     holen();
   }
 
-  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf, tage) {
+  // tag = gezeigter Tag (JJJJ-MM-TT). Heute: Live-Werte und Warnungen; früher: nur Tageswerte aus pvbga_tag.
+  function zeichnen(inhalt, meldung, stand, wechselrichter, live, abruf, tage, tag) {
     const jetzt = Date.now();
-    const heuteIso = tagBerlin(new Date());
-    const monatAb = heuteIso.slice(0, 8) + '01';
-    const jahrAb = heuteIso.slice(0, 5) + '01-01';
+    const istHeute = tag === tagBerlin(new Date());
+    const monatAb = tag.slice(0, 8) + '01';
+    const jahrAb = tag.slice(0, 5) + '01-01';
     const nachId = {};
     live.forEach((x) => { nachId[x.id] = x; });
 
-    // Vergangene Tage je Wechselrichter (heute kommt aus den Live-Werten)
-    const vorher = (tage || []).filter((t) => t.tag < heuteIso && istZahl(Number(t.kwh)));
+    // Tage vor dem gezeigten Tag je Wechselrichter; der gezeigte Tag selbst kommt heute aus den Live-Werten
+    const vorher = (tage || []).filter((t) => t.tag < tag && istZahl(Number(t.kwh)));
     const summeVorher = (ids, ab) => vorher.filter((t) => ids.has(t.id) && t.tag >= ab).reduce((s, t) => s + Number(t.kwh), 0);
-    const ersterTag = vorher.length ? vorher[0].tag : heuteIso;
+    const ersterTag = vorher.length ? vorher[0].tag : tag;
+    const amTag = {};
+    (tage || []).filter((t) => t.tag === tag).forEach((t) => { amTag[t.id] = Number(t.kwh); });
 
     const geraete = wechselrichter.map((w) => {
+      if (!istHeute) {
+        return { w, zeit: null, alterMin: Infinity, kwp: zahlOderNull(w.kwp), aktuell: false, leistung: null,
+          heuteKwh: istZahl(amTag[w.id]) ? amTag[w.id] : null };
+      }
       const x = nachId[w.id] || {};
       const zeit = x.messung_am ? new Date(x.messung_am) : null;
       const alterMin = zeit ? (jetzt - zeit.getTime()) / 60000 : Infinity;
-      const vonHeute = zeit && tagBerlin(zeit) === heuteIso;
+      const vonHeute = zeit && tagBerlin(zeit) === tag;
       return {
         w, zeit, alterMin,
         kwp: zahlOderNull(w.kwp),
@@ -137,6 +145,7 @@
         heuteKwh: vonHeute ? zahlOderNull(x.heute_kwh) : null
       };
     });
+    const tagWort = istHeute ? 'heute' : 'Tag';
 
     // Warnungen nur tagsüber: Vergleich innerhalb derselben Anlage, je kWp (laut Solar-Log)
     const warnungen = [];
@@ -165,9 +174,12 @@
       });
     });
 
-    // Kopf: wann der Solar-Log-Tab zuletzt gemeldet hat
+    // Kopf: wann der Solar-Log-Tab zuletzt gemeldet hat (nur heute)
     meldung.replaceChildren();
-    if (abruf && abruf.letzter_erfolg) {
+    stand.classList.remove('alt');
+    if (!istHeute) {
+      stand.textContent = 'Tageswerte der Wechselrichter vom Solar-Log';
+    } else if (abruf && abruf.letzter_erfolg) {
       const sek = (jetzt - new Date(abruf.letzter_erfolg).getTime()) / 1000;
       stand.textContent = 'Vom Solar-Log gemeldet ' + vorWieLange(sek);
       stand.classList.toggle('alt', sek > MELDUNG_ALT_MIN * 60);
@@ -178,7 +190,7 @@
     } else {
       stand.textContent = 'Noch keine Meldung vom Solar-Log.';
     }
-    if (abruf && abruf.fehler) {
+    if (istHeute && abruf && abruf.fehler) {
       meldung.append(el('div', 'ph-hinweis fehler', 'Letzte Meldung fehlgeschlagen: ' + abruf.fehler));
     }
     warnungen.forEach((t) => meldung.append(el('div', 'ph-hinweis', t)));
@@ -188,10 +200,15 @@
     // Gesamt über beide Anlagen
     const mitLeistung = geraete.filter((g) => istZahl(g.leistung));
     const mitHeute = geraete.filter((g) => istZahl(g.heuteKwh));
+    const summeTag = mitHeute.reduce((s, g) => s + g.heuteKwh, 0);
+    const alleIds = new Set(geraete.map((g) => g.w.id));
     const gesamt = el('div', 'ph-gesamt');
-    gesamt.append(...zahlenZeile('pb-zwei', [
+    gesamt.append(...zahlenZeile('pb-zwei', istHeute ? [
       [mitLeistung.length ? kw(mitLeistung.reduce((s, g) => s + g.leistung, 0)) : '–', 'Leistung jetzt'],
-      [mitHeute.length ? kwh(mitHeute.reduce((s, g) => s + g.heuteKwh, 0), 1) : '–', 'heute erzeugt']
+      [mitHeute.length ? kwh(summeTag, 1) : '–', 'heute erzeugt']
+    ] : [
+      [mitHeute.length ? kwh(summeTag, 1) : '–', 'an diesem Tag erzeugt'],
+      [mitHeute.length || vorher.length ? kwh(summeVorher(alleIds, monatAb) + summeTag, 0) : '–', 'im Monat bis dahin']
     ]).children);
     box.append(gesamt);
 
@@ -212,15 +229,19 @@
 
       const kopf = el('div', 'pb-anlage ' + an.key);
       kopf.append(el('div', 'titel', an.titel + ' · ' + zahl(an.kwp, 0) + ' kWp · ' + gruppe.length + ' Wechselrichter'));
-      kopf.append(zahlenZeile('werte', [
+      kopf.append(zahlenZeile('werte', istHeute ? [
         [leistung.length ? kw(leistung.reduce((s, g) => s + g.leistung, 0)) : '–', 'jetzt'],
         [heuteListe.length ? kwh(heute, 1) : '–', 'heute'],
         [daten ? kwh(monat, 0) : '–', 'Monat']
+      ] : [
+        [heuteListe.length ? kwh(heute, 1) : '–', 'Tag'],
+        [daten ? kwh(monat, 0) : '–', 'Monat'],
+        [daten ? kwh(jahr, 0) : '–', 'Jahr']
       ]));
       const spez = el('div', 'spez');
-      spez.append(el('div', 'unter', 'kWh pro kWp'));
+      spez.append(el('div', 'unter', 'kWh pro kWp' + (istHeute ? '' : ' (Monat und Jahr bis zu diesem Tag)')));
       spez.append(zahlenZeile('werte', [
-        [heuteListe.length ? zahl(heute / an.kwp, 2) : '–', 'heute'],
+        [heuteListe.length ? zahl(heute / an.kwp, 2) : '–', tagWort],
         [daten ? zahl(monat / an.kwp, 2) : '–', 'Monat'],
         [daten ? zahl(jahr / an.kwp, 2) : '–', 'Jahr']
       ]));
@@ -234,16 +255,22 @@
       listen.push(el('div', 'pb-zwischen ' + an.key, 'Wechselrichter ' + an.titel.toLowerCase().replace('anlage', 'Anlage')));
       const liste = el('div', 'ph-liste');
       gruppe.forEach((g) => {
-        const monatG = summeVorher(new Set([g.w.id]), monatAb) + (istZahl(g.heuteKwh) ? g.heuteKwh : 0);
+        const eigen = new Set([g.w.id]);
+        const tagG = istZahl(g.heuteKwh) ? g.heuteKwh : 0;
+        const monatG = summeVorher(eigen, monatAb) + tagG;
         const k = el('div', 'ph-anlage' + (g.warnung ? ' warnung' : ''));
         const kz = el('div', 'kopf');
         kz.append(el('span', 'punkt ' + (g.warnung ? 'rot' : g.aktuell ? 'gruen' : 'grau')),
           el('span', 'nr', g.w.name));
         k.append(kz);
-        k.append(zahlenZeile('werte', [
+        k.append(zahlenZeile('werte', istHeute ? [
           [kw(g.leistung), 'jetzt'],
           [kwh(g.heuteKwh, 1), 'heute'],
           [kwh(monatG, 0), 'Monat']
+        ] : [
+          [kwh(g.heuteKwh, 1), 'Tag'],
+          [kwh(monatG, 0), 'Monat'],
+          [kwh(summeVorher(eigen, jahrAb) + tagG, 0), 'Jahr']
         ]));
         // Balken: Anteil an der Modulleistung laut Solar-Log
         if (istZahl(g.leistung) && g.kwp) {
@@ -253,9 +280,13 @@
           balken.append(fuell);
           k.append(balken);
         }
-        const fuss = g.warnung ? g.warnung.charAt(0).toUpperCase() + g.warnung.slice(1)
-          : g.zeit ? 'Messwert ' + vorWieLange((jetzt - g.zeit.getTime()) / 1000) : 'heute noch kein Wert';
-        k.append(el('div', 'fuss', fuss));
+        if (istHeute) {
+          const fuss = g.warnung ? g.warnung.charAt(0).toUpperCase() + g.warnung.slice(1)
+            : g.zeit ? 'Messwert ' + vorWieLange((jetzt - g.zeit.getTime()) / 1000) : 'heute noch kein Wert';
+          k.append(el('div', 'fuss', fuss));
+        } else if (!istZahl(g.heuteKwh)) {
+          k.append(el('div', 'fuss', 'Für diesen Tag kein Wert'));
+        }
         liste.append(k);
       });
       listen.push(liste);

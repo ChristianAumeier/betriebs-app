@@ -1,6 +1,6 @@
 // Service-Worker: speichert die App-Dateien auf dem Gerät, damit sie ohne Netz startet.
 // Bei jeder neuen Version VERSION hochzählen, damit die Handys die neuen Dateien holen.
-const VERSION = 'v48';
+const VERSION = 'v49';
 const CACHE = 'betriebs-app-' + VERSION;
 const DATEIEN = [
   './',
@@ -12,6 +12,7 @@ const DATEIEN = [
   'energie-zuhause.css',
   'energie-zuhause.js',
   'pv-stockhalle.css',
+  'pv-tag.js',
   'pv-stockhalle.js',
   'pv-biogas.css',
   'pv-biogas.js',
