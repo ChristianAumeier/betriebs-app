@@ -12,7 +12,8 @@
   if (window.__bga) { clearInterval(window.__bga.timer); clearInterval(window.__bga.maus); }
   const SUPABASE = 'https://trwazyqryqdjbfggaufd.supabase.co/rest/v1/rpc/bga_portal_melden';
   const APIKEY = 'sb_publishable_9zKcwyfgNlg19tYQDpivLQ_4j_JkxOc';
-  const TAGE = 3;
+  // zum Nachholen nach einem Ausfall vor dem Einsetzen window.__bgaTage = 12 setzen
+  const TAGE = window.__bgaTage || 3;
   const warte = ms => new Promise(r => setTimeout(r, ms));
   const heute = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
   // nicht toLocaleString mit nur hour: das liefert auf Deutsch „11 Uhr“
